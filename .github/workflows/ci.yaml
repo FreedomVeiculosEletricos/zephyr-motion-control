@@ -1,0 +1,76 @@
+name: "Continuous Integration"
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches:
+      - main
+      - 'releases/**'
+
+jobs:
+  nix-check:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Restore and cache Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.*') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+
+      - run: nix flake check
+
+  build:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install SSH Private Key and Known Hosts
+        run: |
+          mkdir -m 0700 ~/.ssh && echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H github.com > ~/.ssh/known_hosts 2>/dev/null && chmod 600 ~/.ssh/known_hosts
+
+      - name: Restore and cache Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.*') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+
+      - name: Load Nix Development Shell
+        uses: nicknovitski/nix-develop@v1
+        with:
+          arguments: ".#default --accept-flake-config"
+
+      - name: Prepare Zephyr Project workspace
+        run: |
+          west config --global update.narrow true
+          west update
+
+      - name: Twister Tests
+        id: twister-tests
+        run: ./scripts/run-tests --clobber-output  --inline-logs -v -N -M
+
+      - name: Merge Test Results
+        if: steps.twister-tests.conclusion == 'failure'
+        run: |
+          junitparser merge **/twister.xml junit.xml
+          junit2html junit.xml junit.html
+
+      - name: Upload Unit Test Results in HTML
+        if: steps.twister-tests.conclusion == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: HTML Unit Test Results
+          if-no-files-found: ignore
+          path: |
+            junit.html
+
+      - name: Publish Unit Test Results
+        uses: EnricoMi/publish-unit-test-result-action/linux@v2
+        if: steps.twister-tests.conclusion == 'failure'
+        with:
+          check_name: Unit Test Results
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          files: "**/twister.xml"
