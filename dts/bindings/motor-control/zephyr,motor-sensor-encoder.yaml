@@ -1,0 +1,74 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Quadrature encoder position/speed backend combined with phase current
+  sensing (3-shunt, 2-shunt, or 1-shunt DC-link) for motor control.
+
+  The encoder provides absolute angle after index-pulse alignment (or
+  relative angle before alignment). Phase currents are sampled by ADC
+  channels hardware-triggered from the PWM timer underflow event.
+
+compatible: "zephyr,motor-sensor-encoder"
+
+include: base.yaml
+
+properties:
+  encoder-timer:
+    type: phandle
+    required: true
+    description: Timer peripheral configured in quadrature encoder input mode.
+
+  encoder-cpr:
+    type: int
+    required: true
+    description: |
+      Encoder counts per revolution after quadrature decoding.
+      For a 1024 CPR encoder with 4x decoding: encoder-cpr = <4096>.
+
+  pole-pairs:
+    type: int
+    required: true
+    description: |
+      Motor pole pairs. Used to convert mechanical angle to electrical
+      angle: theta_elec = theta_mech * pole-pairs.
+      For a DC brushed motor with no Park transform: pole-pairs = <1>.
+
+  index-gpio:
+    type: phandle-array
+    description: |
+      Optional encoder index (Z) pulse GPIO for absolute-zero alignment.
+      When present, the backend performs an index search at enable() and
+      sets valid_theta = true only after the index pulse is detected.
+
+  io-channels:
+    type: phandle-array
+    required: true
+    description: |
+      ADC channels for phase current measurement.
+      Provide 1, 2, or 3 channels:
+        1 channel: DC-link single shunt (i_phase_a); Ib and Ic reconstructed.
+        2 channels: dual shunt (i_phase_a, i_phase_b); Ic = -Ia - Ib.
+        3 channels: 3-shunt (i_phase_a, i_phase_b, i_phase_c); no reconstruction.
+      An optional additional channel named "v_bus" may be appended.
+
+  io-channel-names:
+    type: string-array
+    description: |
+      Names for io-channels entries.
+      Valid names: "i_phase_a", "i_phase_b", "i_phase_c", "v_bus".
+
+  adc-trigger-event:
+    type: int
+    description: |
+      Hardware trigger event ID linking the PWM center-aligned underflow
+      event to the ADC start-of-conversion. Platform-specific.
+      STM32 example: TIM1_TRGO = 0x00000001.
+      If absent, ADC uses software trigger (lower timing accuracy).
+
+  current-offset-ua:
+    type: array
+    description: |
+      Per-channel current sense offset in microamperes at zero current.
+      Applied during calibration; overrides runtime offset measurement
+      when present. Array length must match io-channels count.

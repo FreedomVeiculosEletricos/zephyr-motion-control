@@ -1,0 +1,21 @@
+# Copyright (c) 2023-2026 Freedom Veiculos Eletricos
+# SPDX-License-Identifier: UNLICENSED
+
+result
+/.direnv/
+/.venv*/
+__pycache__/
+/build
+/firmware*/
+/twister-out*/
+*~
+/deps/
+/data/
+__init__.py
+pytest-results.xml
+log.html
+/logs/
+report.html
+robot_output.xml
+/simulator/
+/snapshots/

@@ -1,0 +1,83 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Sensorless position/speed backend using BEMF or flux observer.
+  Requires phase current and bus voltage sensing. Not valid at
+  standstill unless observer-type includes HFI.
+
+  Supported observer types:
+    bemf-pu  : Per-unit BEMF observer. Valid above ~5% rated speed.
+               Requires open-loop start-up ramp to acquire tracking.
+    flux-hfi : Flux observer with HFI injection for standstill and
+               low-speed operation. Requires Ld != Lq (salient motor).
+    mras     : Model Reference Adaptive System. Used for AC induction
+               motor slip estimation.
+
+compatible: "zephyr,motor-sensor-sensorless"
+
+include: base.yaml
+
+properties:
+  io-channels:
+    type: phandle-array
+    required: true
+    description: |
+      ADC channels in order: [i_phase_a, i_phase_b, v_bus].
+      A third current channel (i_phase_c) may optionally be added
+      for 3-shunt sensing; otherwise Ic = -Ia - Ib.
+
+  io-channel-names:
+    type: string-array
+    description: |
+      Names for io-channels entries.
+      Valid names: "i_phase_a", "i_phase_b", "i_phase_c", "v_bus".
+
+  pole-pairs:
+    type: int
+    required: true
+    description: Motor pole pairs.
+
+  observer-type:
+    type: string
+    enum:
+      - "bemf-pu"
+      - "flux-hfi"
+      - "mras"
+    default: "bemf-pu"
+    description: Observer algorithm variant. See binding description.
+
+  rs-mohm:
+    type: int
+    required: true
+    description: |
+      Stator resistance in milliohms (mΩ).
+      Used by the observer voltage model.
+
+  ld-uh:
+    type: int
+    required: true
+    description: |
+      D-axis inductance in microhenries (µH).
+
+  lq-uh:
+    type: int
+    required: true
+    description: |
+      Q-axis inductance in microhenries (µH).
+      For isotropic motors (SPM): lq-uh = ld-uh.
+      For salient motors (IPM): lq-uh > ld-uh (required for flux-hfi).
+
+  flux-linkage-uwb:
+    type: int
+    description: |
+      Permanent magnet flux linkage in micro-Weber (µWb).
+      Required for PMSM bemf-pu and flux-hfi observers.
+      Not used for MRAS (AC induction).
+
+  adc-trigger-event:
+    type: int
+    description: |
+      Hardware ADC trigger event ID. Platform-specific.
+      Center-aligned PWM underflow trigger is strongly recommended
+      for sensorless — sampling jitter degrades observer accuracy.

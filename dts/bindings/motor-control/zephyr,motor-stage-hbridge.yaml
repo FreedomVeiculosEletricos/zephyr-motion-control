@@ -1,0 +1,89 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Single full-bridge (H-bridge) power stage for DC brushed motors,
+  or dual H-bridge for 2-phase stepper motors.
+
+  The left half-bridge drives forward direction; the right half-bridge
+  drives reverse. The actuator backend maps the signed Vα from
+  set_vector() to PWM duty:
+    Vα > 0  →  left half-bridge active  (forward)
+    Vα < 0  →  right half-bridge active (reverse)
+    Vα = 0  →  both disabled            (coast or brake per drive mode)
+
+  set_duty([d]) is also supported for open-loop duty control.
+
+compatible: "zephyr,motor-stage-hbridge"
+
+include: base.yaml
+
+properties:
+  pwm-left:
+    type: phandle-array
+    required: true
+    description: PWM specifier for the left (forward) half-bridge output.
+
+  pwm-right:
+    type: phandle-array
+    required: true
+    description: PWM specifier for the right (reverse) half-bridge output.
+
+  nfault-gpios:
+    type: phandle-array
+    description: |
+      Gate driver nFAULT input GPIO (active-low, interrupt-capable).
+      When asserted, the hardware has already disabled outputs.
+      The backend fires motor_fault_cb_t with MOTOR_FAULT_GATE_DRIVER.
+
+  nsleep-gpios:
+    type: phandle-array
+    description: |
+      Gate driver nSLEEP / shutdown GPIO (active-high or active-low
+      depending on driver). Used to place the driver in low-power mode
+      when the motor is idle.
+
+  sto-gpios:
+    type: phandle-array
+    description: |
+      Dual-channel Safe Torque Off input GPIOs [STO_CH1, STO_CH2].
+      Both channels must be GPIO_ACTIVE_HIGH and interrupt-capable.
+      When both assert, PWM outputs are inhibited in hardware.
+      Required for ASIL-B and above. If absent, motor_sto_arm()
+      returns -ENOTSUP.
+      Example:
+        sto-gpios = <&gpiob 10 GPIO_ACTIVE_HIGH>,
+                    <&gpiob 11 GPIO_ACTIVE_HIGH>;
+
+  pwm-frequency:
+    type: int
+    required: true
+    description: PWM switching frequency in Hz.
+
+  deadtime-ns:
+    type: int
+    default: 0
+    description: |
+      Dead-time between complementary half-bridge transitions
+      (nanoseconds). Set to 0 if the gate driver IC handles
+      dead-time internally (e.g. DRV8833).
+
+  vbus-fault-threshold-mv:
+    type: int
+    description: |
+      Bus voltage fault threshold in millivolts used during the
+      self_test() transistor check sequence. If the bus voltage
+      collapses below this level while both low-side transistors
+      are off, a multiple-short condition is flagged.
+
+  io-channels:
+    type: phandle-array
+    description: |
+      Optional ADC channels for bus voltage and board temperature.
+      Channel names: "v_bus", "temp_board".
+
+  io-channel-names:
+    type: string-array
+    description: |
+      Names for optional io-channels entries.
+      Valid names: "v_bus", "temp_board".

@@ -1,0 +1,31 @@
+# Copyright (c) 2024-2026 Freedom Veiculos Eletricos
+# SPDX-License-Identifier: UNLICENSED
+
+manifest:
+  defaults:
+    remote: freedom
+
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+    - name: freedom
+      url-base: git@github.com:FreedomVeiculosEletricos
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: v4.4.0-rc3
+      import:
+        path-prefix: deps
+        name-allowlist:
+          - cmsis_6
+          - hal_atmel
+          - hal_espressif
+          - hal_nordic
+          - hal_stm32
+          - mcuboot
+          - mbedtls
+          - tf-psa-crypto
+          - zcbor
+  self:
+    import:

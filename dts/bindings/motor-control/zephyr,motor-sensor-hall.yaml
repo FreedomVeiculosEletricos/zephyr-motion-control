@@ -1,0 +1,61 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Hall effect sensor × 3 position backend for BLDC trapezoidal or
+  sinusoidal (FOC) control. Provides 60° resolution sector-based
+  position and period-based speed estimation.
+
+  Hall sensors are detected via GPIO EXTI on both edges. Sector
+  transitions update the electrical angle in 60° steps; the angle
+  between transitions is linearly interpolated.
+
+  No alignment sequence is required — Hall sensors provide an
+  absolute sector at standstill. The controller transitions directly
+  from IDLE to RUN on enable().
+
+compatible: "zephyr,motor-sensor-hall"
+
+include: base.yaml
+
+properties:
+  hall-gpios:
+    type: phandle-array
+    required: true
+    description: |
+      Three Hall sensor GPIO inputs [H_U, H_V, H_W].
+      All three must support GPIO_INT_EDGE_BOTH.
+      Example:
+        hall-gpios = <&gpioc 6 GPIO_ACTIVE_HIGH>,
+                     <&gpioc 7 GPIO_ACTIVE_HIGH>,
+                     <&gpioc 8 GPIO_ACTIVE_HIGH>;
+
+  pole-pairs:
+    type: int
+    required: true
+    description: Motor pole pairs.
+
+  hall-sequence:
+    type: array
+    description: |
+      Custom Hall sector → commutation step mapping (6 entries, values 1–6).
+      Default: standard 120° Hall sequence [5, 1, 3, 2, 6, 4].
+      Override when the motor wiring produces a non-standard sequence.
+
+  io-channels:
+    type: phandle-array
+    description: |
+      ADC channels for phase current measurement. Same conventions as
+      zephyr,motor-sensor-encoder io-channels.
+
+  io-channel-names:
+    type: string-array
+    description: |
+      Names for io-channels entries.
+      Valid names: "i_phase_a", "i_phase_b", "i_phase_c", "v_bus".
+
+  adc-trigger-event:
+    type: int
+    description: |
+      Hardware ADC trigger event ID. Platform-specific.
+      If absent, software-triggered ADC is used.
