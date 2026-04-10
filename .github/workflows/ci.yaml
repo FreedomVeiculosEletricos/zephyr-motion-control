@@ -50,7 +50,7 @@ jobs:
 
       - name: Twister Tests
         id: twister-tests
-        run: ./scripts/run-tests --clobber-output  --inline-logs -v -N -M
+        run: west twister -G --testsuite-root . --tag motor_control --clobber-output --inline-logs -v -N -M
 
       - name: Merge Test Results
         if: steps.twister-tests.conclusion == 'failure'
