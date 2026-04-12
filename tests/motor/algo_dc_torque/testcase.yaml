@@ -1,0 +1,13 @@
+# Copyright (c) 2026 Freedom Veiculos Eletricos
+# SPDX-License-Identifier: Apache-2.0
+#
+# native_sim: use ../../run_twister.sh or export NSI_OPT=-O2 before twister (NSI host -O0 + glibc).
+
+common:
+  tags:
+    - motor
+    - motor_algo
+tests:
+  motor.algo.dc_torque:
+    integration_platforms:
+      - native_sim/native/64

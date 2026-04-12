@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+common:
+  tags:
+    - motor
+    - motor_subsys
+tests:
+  motor.subsys:
+    integration_platforms:
+      - native_sim/native/64
