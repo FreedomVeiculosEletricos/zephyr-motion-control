@@ -7,7 +7,7 @@
 #ifndef ZEPHYR_INCLUDE_DRIVERS_MOTOR_MOTOR_SENSOR_H_
 #define ZEPHYR_INCLUDE_DRIVERS_MOTOR_MOTOR_SENSOR_H_
 
-#include <zephyr/drivers/motor/motor_types.h>
+#include <zephyr/subsys/motor/motor_types.h>
 #include <zephyr/device.h>
 
 #ifdef __cplusplus

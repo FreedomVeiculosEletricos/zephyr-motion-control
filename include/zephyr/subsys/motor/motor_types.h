@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef ZEPHYR_INCLUDE_DRIVERS_MOTOR_MOTOR_TYPES_H_
-#define ZEPHYR_INCLUDE_DRIVERS_MOTOR_MOTOR_TYPES_H_
+#ifndef ZEPHYR_INCLUDE_SUBSYS_MOTOR_MOTOR_TYPES_H_
+#define ZEPHYR_INCLUDE_SUBSYS_MOTOR_MOTOR_TYPES_H_
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -128,4 +128,4 @@ enum motor_accel_profile {
 }
 #endif
 
-#endif /* ZEPHYR_INCLUDE_DRIVERS_MOTOR_MOTOR_TYPES_H_ */
+#endif /* ZEPHYR_INCLUDE_SUBSYS_MOTOR_MOTOR_TYPES_H_ */

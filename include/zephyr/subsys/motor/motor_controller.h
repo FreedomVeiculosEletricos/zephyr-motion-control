@@ -4,17 +4,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef ZEPHYR_INCLUDE_DRIVERS_MOTOR_MOTOR_CONTROLLER_H_
-#define ZEPHYR_INCLUDE_DRIVERS_MOTOR_MOTOR_CONTROLLER_H_
+#ifndef ZEPHYR_INCLUDE_SUBSYS_MOTOR_MOTOR_CONTROLLER_H_
+#define ZEPHYR_INCLUDE_SUBSYS_MOTOR_MOTOR_CONTROLLER_H_
 
-#include <zephyr/drivers/motor/motor_types.h>
+#include <zephyr/subsys/motor/motor_types.h>
 #include <zephyr/drivers/motor/motor_sensor.h>
 #include <zephyr/drivers/motor/motor_actuator.h>
 #include <zephyr/kernel.h>
 
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+struct motor_ctrl;
+
+/** Application callbacks (Interface A); optional, may be NULL. */
+typedef void (*motor_ctrl_app_state_cb)(struct motor_ctrl *ctrl, enum motor_state state,
+					void *user_data);
+typedef void (*motor_ctrl_app_fault_cb)(struct motor_ctrl *ctrl, uint32_t faults,
+					void *user_data);
 
 /**
  * @brief Motor Controller Layer
@@ -28,25 +37,19 @@ extern "C" {
  * Multi-rate loop architecture
  * ----------------------------
  *
- *   Rate 0 — Current loop (fires from PWM period ISR, ~20–100 kHz)
+ *   Rate 0 — @ref motor_algo_ops.inner_step (ISR / power-stage callback, ~20–100 kHz)
  *     Triggered by: motor_control_cb_t from power stage backend.
  *     Reads:  sensor_output_t.i_phase[], .theta_rad
- *     Writes: motor_actuator_set_vector(Vα, Vβ)
- *     Algorithm: Clarke → Park → Id/Iq PI → inv-Park → SVPWM
- *                OR 6-step commutation table
- *                OR duty passthrough (open-loop)
+ *     Writes: @ref motor_actuator_set_command (e.g. αβ, d/q, or duty)
+ *     Algorithm: implementation-defined (FOC, six-step, DC current loop, V/f, …).
  *
- *   Rate 1 — Speed loop (~1 kHz, RTOS thread or SW timer)
- *     Triggered by: k_timer or count-down from current loop ISR.
- *     Reads:  sensor_output_t.omega_rad_s
- *     Writes: controller_state.iq_ref (current-loop setpoint)
- *     Algorithm: Speed PI with anti-windup + accel profile
+ *   Rate 1 — @ref motor_algo_ops.outer_step_0 (~1 kHz, RTOS thread when enabled)
+ *     Optional; NULL for single-rate algorithms.
+ *     Typical: speed PI, intermediate cascade.
  *
- *   Rate 2 — Position loop (~100–500 Hz, RTOS thread)
- *     Triggered by: k_timer
- *     Reads:  sensor_output_t.theta_mech (mechanical angle)
- *     Writes: controller_state.omega_ref (speed-loop setpoint)
- *     Algorithm: Position P/PD + trajectory generator
+ *   Rate 2 — @ref motor_algo_ops.outer_step_1 (~100–500 Hz, same thread as outer_step_0)
+ *     Optional; NULL if unused.
+ *     Typical: position / trajectory.
  *
  *   Rate 3 — Supervision (~10–100 Hz, low-priority thread)
  *     Fault policy, thermal derating, state machine transitions,
@@ -54,42 +57,55 @@ extern "C" {
  *
  * Data handoff between ISR and threads
  * -------------------------------------
- *   The current loop ISR writes to a double-buffer.  Speed and
- *   position loops consume the non-ISR buffer using atomic pointer
- *   swap.  No mutex in the ISR path.
+ *   The inner-step ISR writes to a double-buffer.  Outer steps
+ *   consume the non-ISR buffer using atomic pointer swap.  No mutex
+ *   in the ISR path.
  */
 
 /* ------------------------------------------------------------------ */
-/* Controller setpoints (written by speed/position loops or app)      */
+/* Controller setpoints (written by outer steps or app)               */
 /* ------------------------------------------------------------------ */
 
 /**
  * @brief Internal controller setpoints — live state shared across rates.
  *
- * Written by the outer loops (speed, position) or directly by the
- * application in current/open-loop modes.
- * Read by the inner current loop in ISR context.
+ * Naming is **physical / axis-neutral**: torque vs flux components, not FOC-only.
+ * Each algorithm maps these to its internal representation (e.g. Id/Iq, Ia, duty).
  *
- * All float fields must be written atomically where the target
- * does not guarantee float atomicity — use the provided
- * motor_ctrl_set_*() accessors which apply the appropriate barrier.
+ * Written by outer loops or the application; read by @ref motor_algo_ops.inner_step
+ * in ISR context.
  */
 struct motor_ctrl_setpoints {
-	float id_ref;    /* d-axis current setpoint (A) — FOC field weakening */
-	float iq_ref;    /* q-axis current setpoint (A) — torque              */
-	float omega_ref; /* speed setpoint (rad/s) — speed mode               */
-	float theta_ref; /* position setpoint (rad) — position mode            */
-	float vd_ref;    /* d-axis voltage (V) — open-loop voltage mode        */
-	float vq_ref;    /* q-axis voltage (V) — open-loop voltage mode        */
+	/**
+	 * Torque-producing current reference (A).
+	 * Examples: quadrature (Iq) current in rotating frame; DC brushed armature Ia.
+	 */
+	float i_torque_a;
+	/**
+	 * Flux / field-producing current reference (A).
+	 * Examples: direct (Id) current for FOC field weakening; unused (0) for DC brushed.
+	 */
+	float i_flux_a;
+	/** Mechanical speed setpoint (rad/s) — used when @ref motor_control_mode is speed. */
+	float omega_mech_rad_s;
+	/** Mechanical position setpoint (rad) — used in position mode. */
+	float theta_mech_rad;
+	/**
+	 * Open-loop voltage: torque axis (V).
+	 * Examples: Vq in rotating frame; scalar V for single-phase open-loop.
+	 */
+	float v_torque_v;
+	/** Open-loop voltage: flux axis (V). Examples: Vd in rotating frame. */
+	float v_flux_v;
 	enum motor_drive_mode drive_mode;
 };
 
 /* ------------------------------------------------------------------ */
-/* Controller parameters (gains, limits, profiles)                    */
+/* Controller parameters — shell only (algorithm-agnostic)             */
 /* ------------------------------------------------------------------ */
 
 /**
- * @brief PI controller gains.
+ * @brief PI controller gains (used by outer loops when present).
  */
 struct motor_pi_gains {
 	float kp;
@@ -99,49 +115,60 @@ struct motor_pi_gains {
 };
 
 /**
- * @brief Acceleration profile parameters.
+ * @brief Acceleration profile parameters (outer trajectory).
  */
 struct motor_accel_params {
 	enum motor_accel_profile type;
-	float max_accel_rad_s2; /* maximum angular acceleration (rad/s²) */
-	float max_jerk_rad_s3;  /* S-curve jerk limit (rad/s³)           */
+	float max_accel_rad_s2;
+	float max_jerk_rad_s3;
 };
 
 /**
- * @brief Full controller parameter set.
+ * @brief Safety and operating limits (independent of control law).
+ */
+struct motor_ctrl_limits {
+	float i_max_a;
+	float speed_max_rad_s;
+	float vbus_derating_start;
+	float temp_derating_start;
+	float temp_fault;
+};
+
+/**
+ * @brief Timing for the controller shell (ISR cadence).
+ */
+struct motor_ctrl_timing {
+	/** Inner (fast) loop sample period (s), e.g. 1/20000 for 20 kHz. */
+	float control_loop_dt_s;
+};
+
+/**
+ * @brief Parameters shared by @ref motor_ctrl for all algorithms.
  *
- * May be updated at runtime via motor_ctrl_set_params() from thread
- * context.  Parameters are copied atomically into the controller
- * before the next current-loop execution.
+ * Holds **limits, timing, and application-facing motor constants** only.
+ * Current-loop / FOC / observer gains belong in the algorithm’s private state,
+ * not here — otherwise every motor type would carry unused fields.
+ *
+ * Updated at runtime via motor_ctrl_set_params() (thread context).
  */
 struct motor_ctrl_params {
-	/* Current (torque) loop */
-	struct motor_pi_gains id_loop;
-	struct motor_pi_gains iq_loop;
+	struct motor_ctrl_limits limits;
+	struct motor_ctrl_timing timing;
 
-	/* Speed loop */
+	/**
+	 * Torque constant (N·m/A) for @ref motor_set_torque() → current reference.
+	 * Set to 0 if torque-from-current is not used.
+	 */
+	float kt_nm_per_a;
+
+	/** Pole pairs (mechanical ↔ electrical speed); use 1 for DC brushed. */
+	uint8_t pole_pairs;
+
+	/* --- Optional outer-loop tuning (when outer steps are enabled) --- */
 	struct motor_pi_gains speed_loop;
 	struct motor_accel_params accel;
-
-	/* Position loop */
 	float kp_pos;
 	float kd_pos;
-
-	/* Limits */
-	float i_max_a;             /* peak phase current limit (A)          */
-	float speed_max_rad_s;     /* maximum mechanical speed (rad/s)      */
-	float vbus_derating_start; /* Vbus below this → derate torque (V)   */
-
-	/* Thermal derating */
-	float temp_derating_start; /* °C above which torque is derated      */
-	float temp_fault;          /* °C at which OVERTEMP fault is raised  */
-
-	/* Motor parameters (used by observers) */
-	uint8_t pole_pairs;
-	float Rs;           /* stator resistance (Ω)                 */
-	float Ld;           /* d-axis inductance (H)                 */
-	float Lq;           /* q-axis inductance (H)                 */
-	float flux_linkage; /* permanent magnet flux linkage (Wb)    */
 };
 
 /* ------------------------------------------------------------------ */
@@ -151,9 +178,15 @@ struct motor_ctrl_params {
 /**
  * @brief Controller algorithm operations.
  *
- * Each algorithm (FOC, 6-step, open-loop, V/f, DTC) implements
- * this vtable.  The motor subsystem dispatches to the active
- * algorithm without knowing its internals.
+ * Each algorithm (e.g. FOC, six-step, DC torque, V/f) implements
+ * this vtable. Names are **scheduling-centric**, not physics-centric:
+ * single-rate algorithms may set only @ref inner_step; multi-rate algorithms
+ * may also use @ref outer_step_0 and @ref outer_step_1.
+ *
+ * Dispatch contract (when @ref CONFIG_MOTOR_CTRL_OUTER_LOOPS is enabled):
+ *   - @ref inner_step — ISR (power-stage callback), highest rate.
+ *   - @ref outer_step_0 — outer thread, faster cadence (e.g. ~1 kHz).
+ *   - @ref outer_step_1 — same thread, lower cadence (e.g. ~100 Hz); may be NULL.
  */
 struct motor_algo_ops {
 	/**
@@ -167,40 +200,35 @@ struct motor_algo_ops {
 	int (*init)(void *algo_data, const struct motor_ctrl_params *params);
 
 	/**
-	 * @brief Execute current-loop step (ISR context, ~20–100 kHz).
+	 * @brief Inner / fast path step (ISR context, e.g. PWM period ~20–100 kHz).
+	 *
+	 * Computes @ref motor_actuator_cmd from setpoints and sensor. Required.
+	 * Must set @p cmd->kind and the matching union arm.
 	 *
 	 * @param algo_data  Per-algorithm private state.
 	 * @param sense      Latest sensor output.
 	 * @param sp         Current setpoints.
-	 * @param valpha     Output: alpha-axis voltage (normalised).
-	 * @param vbeta      Output: beta-axis voltage  (normalised).
+	 * @param cmd        Output: command to the power stage (written by algo).
 	 */
-	void (*current_loop)(void *algo_data, const struct motor_sensor_output *sense,
-			     const struct motor_ctrl_setpoints *sp, float *valpha, float *vbeta);
+	void (*inner_step)(void *algo_data, const struct motor_sensor_output *sense,
+			   const struct motor_ctrl_setpoints *sp, struct motor_actuator_cmd *cmd);
 
 	/**
-	 * @brief Execute speed-loop step (thread context, ~1 kHz).
+	 * @brief First outer step (thread context, higher priority outer work).
 	 *
-	 * Updates sp->iq_ref based on omega error.
-	 *
-	 * @param algo_data  Per-algorithm private state.
-	 * @param sense      Latest sensor output.
-	 * @param sp         Setpoints struct (iq_ref written here).
+	 * Optional (NULL if single-rate). Typical use: speed or intermediate
+	 * cascade; may update @p sp (e.g. inner setpoints).
 	 */
-	void (*speed_loop)(void *algo_data, const struct motor_sensor_output *sense,
-			   struct motor_ctrl_setpoints *sp);
+	void (*outer_step_0)(void *algo_data, const struct motor_sensor_output *sense,
+			     struct motor_ctrl_setpoints *sp);
 
 	/**
-	 * @brief Execute position-loop step (thread context, ~100–500 Hz).
+	 * @brief Second outer step (thread context, lower cadence than outer_step_0).
 	 *
-	 * Updates sp->omega_ref based on position error.
-	 *
-	 * @param algo_data  Per-algorithm private state.
-	 * @param sense      Latest sensor output.
-	 * @param sp         Setpoints struct (omega_ref written here).
+	 * Optional (NULL). Typical use: position / trajectory; may update @p sp.
 	 */
-	void (*position_loop)(void *algo_data, const struct motor_sensor_output *sense,
-			      struct motor_ctrl_setpoints *sp);
+	void (*outer_step_1)(void *algo_data, const struct motor_sensor_output *sense,
+			     struct motor_ctrl_setpoints *sp);
 
 	/**
 	 * @brief Update algorithm parameters at runtime.
@@ -246,29 +274,43 @@ struct motor_ctrl {
 	enum motor_control_mode mode;
 	uint32_t fault_flags; /* accumulated fault bitmask      */
 
-	/* Setpoints — written by outer loops, read by current loop ISR  */
+	/* Setpoints — written by outer steps, read by inner_step ISR */
 	struct motor_ctrl_setpoints setpoints;
 
 	/* Parameters — updated via motor_ctrl_set_params()              */
 	struct motor_ctrl_params params;
 
-	/* Multi-rate scheduling                                          */
-	uint32_t current_loop_cnt;  /* ISR counter for speed divider    */
-	uint32_t speed_loop_div;    /* current_loop ticks per speed tick */
-	uint32_t position_loop_div; /* current_loop ticks per pos tick   */
+	/* Multi-rate scheduling (reserved for future divider-driven outers) */
+	uint32_t inner_step_cnt; /* ISR counter for outer cadence        */
+	uint32_t outer0_div;     /* inner steps per outer_step_0 tick  */
+	uint32_t outer1_div;     /* inner steps per outer_step_1 tick    */
 
 	/* Double-buffer for ISR → thread data handoff                   */
 	struct motor_sensor_output sense_buf[2];
 	atomic_t sense_buf_idx; /* index of the ISR-written buffer */
 
-	/* Supervision timer (Rate 3)                                     */
+	/* Supervision timer (Rate 3) — reserved; outer thread uses periodic wake */
 	struct k_timer supervision_timer;
+
+#if IS_ENABLED(CONFIG_MOTOR_CTRL_OUTER_LOOPS)
+	/* Outer steps: dedicated thread (outer_step_0 / outer_step_1) */
+	struct k_thread outer_thread;
+	K_KERNEL_STACK_MEMBER(outer_stack_mem, CONFIG_MOTOR_CTRL_OUTER_STACK_SIZE);
+	bool outer_thread_started;
+#endif
 
 	/* Mutex protecting state transitions and param updates           */
 	struct k_mutex lock;
 
 	/* Watchdog: ISR must toggle this each cycle                      */
 	atomic_t watchdog_cnt;
+
+	/** Inner (ISR) rate in Hz; derived from @ref motor_ctrl_timing.control_loop_dt_s. */
+	uint32_t inner_rate_hz;
+
+	motor_ctrl_app_state_cb app_state_cb;
+	motor_ctrl_app_fault_cb app_fault_cb;
+	void *app_cb_data;
 };
 
 /**
@@ -293,7 +335,8 @@ struct motor_ctrl {
  * @param actuator Power stage backend device.
  * @param algo     Algorithm vtable.
  * @param algo_data Algorithm private state buffer.
- * @param params   Initial parameters (NULL = use defaults).
+ * @param params   Initial parameters (required). For DT-driven motors use
+ *                 @ref MOTOR_SUBSYS_DEFINE_DT or @ref MOTOR_CTRL_PARAMS_INITIALIZER.
  * @retval 0 on success, negative errno on failure.
  */
 int motor_ctrl_init(struct motor_ctrl *ctrl, const struct device *sensor,
@@ -380,4 +423,4 @@ void motor_ctrl_get_status(const struct motor_ctrl *ctrl, enum motor_state *stat
 }
 #endif
 
-#endif /* ZEPHYR_INCLUDE_DRIVERS_MOTOR_MOTOR_CONTROLLER_H_ */
+#endif /* ZEPHYR_INCLUDE_SUBSYS_MOTOR_MOTOR_CONTROLLER_H_ */

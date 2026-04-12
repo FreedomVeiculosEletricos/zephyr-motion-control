@@ -7,8 +7,8 @@
 #ifndef ZEPHYR_INCLUDE_SUBSYS_MOTOR_MOTOR_H_
 #define ZEPHYR_INCLUDE_SUBSYS_MOTOR_MOTOR_H_
 
-#include <zephyr/drivers/motor/motor_types.h>
-#include <zephyr/drivers/motor/motor_controller.h>
+#include <zephyr/subsys/motor/motor_types.h>
+#include <zephyr/subsys/motor/motor_controller.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -103,7 +103,7 @@ typedef void (*motor_fault_notify_cb_t)(motor_t motor, uint32_t faults, void *us
  * @param actuator  Power stage backend device.
  * @param algo      Algorithm vtable (e.g. &motor_algo_foc, &motor_algo_6step).
  * @param algo_data Algorithm private state buffer.
- * @param params    Initial parameters, or NULL for defaults.
+ * @param params    Initial parameters (required); from Devicetree via subsystem macros.
  * @return          Motor handle on success, NULL on failure.
  */
 motor_t motor_init(struct motor_ctrl *ctrl, const struct device *sensor,
@@ -277,9 +277,8 @@ int motor_sto_release(motor_t motor, uint32_t *faults);
  * Parameters are automatically reloaded at the next boot via
  * settings_load_subtree().
  *
- * Motor physical constants (Rs, Ld, Lq, flux linkage, pole pairs) are
- * stored in the devicetree and are not persisted here — they are
- * compile-time constants, not runtime tuning results.
+ * Motor-specific tuning held in algorithm private state is not described
+ * here — only @ref motor_ctrl_params fields are considered for persistence.
  *
  * @param motor  Motor handle.
  * @retval 0 on success.
