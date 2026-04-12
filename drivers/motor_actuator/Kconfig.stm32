@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Freedom Veiculos Eletricos
+# SPDX-License-Identifier: UNLICENSED
+
+# STM32: LL timers (motor-stage-hbridge-stm32).
+
+config MOTOR_STAGE_HBRIDGE_STM32
+	bool "STM32 LL H-bridge (zephyr,motor-stage-hbridge-stm32)"
+	depends on SOC_SERIES_STM32G4X
+	depends on GPIO
+	select PINCTRL
+	help
+	  H-bridge using STM32 LL timers (no Zephyr PWM on the hot path).
+
+config MOTOR_STAGE_HBRIDGE_STM32_INIT_PRIORITY
+	int "Init priority for motor-stage-hbridge-stm32"
+	default 45
+	depends on MOTOR_STAGE_HBRIDGE_STM32
+	help
+	  Must run before motor-sensor-encoder-stm32 so the timer is configured first.
