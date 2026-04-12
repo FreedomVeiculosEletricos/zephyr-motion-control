@@ -1,0 +1,62 @@
+/*
+ * Copyright (c) 2026 Zephyr Motor Control Contributors
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * NUCLEO-G474RE: full-bridge DC (two half-bridge legs on TIM3). Independent PWM
+ * on CH1/CH2; TIM3 TRGO triggers ADC1 injected. Disable Zephyr pwm3 so TIM3 is
+ * not claimed twice.
+ */
+
+/ {
+	/* Composition node for MOTOR_SUBSYS_DEFINE_DT(motor_brushed, ...). */
+	motor_brushed: motor-controller {
+		compatible = "zephyr,motor-controller";
+		status = "okay";
+
+		sensor = <&motor_sensor_brushed>;
+		actuator = <&motor_stage_brushed>;
+		algorithm = "dc-torque";
+		dc-kt-mnm-per-a = <50>;
+		pole-pairs = <1>;
+		current-loop-rate-hz = <20000>;
+		i-max-ma = <3000>;
+		speed-max-rpm = <6000>;
+	};
+
+	motor_sensor_brushed: motor-sensor-brushed {
+		compatible = "zephyr,motor-sensor-encoder-stm32";
+		status = "okay";
+
+		st,adc = <&adc1>;
+		adc-channel = <1>;
+		adc-trigger-timer = <&timers3>;
+		sync-actuator = <&motor_stage_brushed>;
+		zephyr,adc-irq-priority = <2>;
+
+		encoder-cpr = <2048>;
+		pole-pairs = <1>;
+	};
+
+	motor_stage_brushed: motor-stage-brushed {
+		compatible = "zephyr,motor-stage-hbridge-stm32";
+		status = "okay";
+
+		st,pwm-timer = <&timers3>;
+		pwm-channels = <1 2>;
+		pwm-frequency = <20000>;
+		deadtime-ns = <0>;
+		trgo-source = "update";
+
+		pinctrl-0 = <&tim3_ch1_pb4 &tim3_ch2_pc7>;
+		pinctrl-names = "default";
+	};
+};
+
+&timers3 {
+	status = "okay";
+	st,prescaler = <0>;
+};
+
+&pwm3 {
+	status = "disabled";
+};
