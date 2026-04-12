@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Freedom Veiculos Eletricos
+# SPDX-License-Identifier: UNLICENSED
+
+# ESP32-S3: MCPWM HAL (motor-stage-hbridge-esp32s3).
+
+config MOTOR_STAGE_HBRIDGE_ESP32S3
+	bool "ESP32-S3 MCPWM H-bridge (zephyr,motor-stage-hbridge-esp32s3)"
+	depends on SOC_SERIES_ESP32S3
+	depends on GPIO
+	select PINCTRL
+	help
+	  H-bridge via MCPWM HAL (no Zephyr PWM driver on the hot path).
+
+config MOTOR_STAGE_HBRIDGE_ESP32S3_INIT_PRIORITY
+	int "Init priority for motor-stage-hbridge-esp32s3"
+	default 45
+	depends on MOTOR_STAGE_HBRIDGE_ESP32S3
+	help
+	  Must run before the sensor driver so MCPWM is configured first.

@@ -1,0 +1,23 @@
+# Copyright (c) 2026 Freedom Veiculos Eletricos
+# SPDX-License-Identifier: UNLICENSED
+
+# STM32: LL ADC + timer TRGO (motor-sensor-encoder-stm32).
+
+config MOTOR_SENSOR_ENCODER_STM32
+	bool "STM32 encoder + injected ADC (zephyr,motor-sensor-encoder-stm32)"
+	depends on SOC_SERIES_STM32G4X
+	help
+	  Current sense via LL ADC injected group; ADC ISR invokes sync-actuator callback.
+
+config MOTOR_SENSOR_ENCODER_STM32_INIT_PRIORITY
+	int "Init priority for motor-sensor-encoder-stm32"
+	default 46
+	depends on MOTOR_SENSOR_ENCODER_STM32
+
+config MOTOR_STM32_ADC_IRQ_PRIORITY
+	int "Default NVIC priority for ADC JEOC ISR (STM32 sensor)"
+	default 2
+	range 0 15
+	depends on MOTOR_SENSOR_ENCODER_STM32
+	help
+	  Used when zephyr,adc-irq-priority is not set in devicetree.

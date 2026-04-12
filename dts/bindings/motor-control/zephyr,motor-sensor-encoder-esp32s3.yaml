@@ -1,0 +1,72 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  ESP32-S3: phase current via SAR ADC digital mode + DMA; end-of-block (EOF) latches
+  the sample and invokes the sync-actuator callback. MCPWM→conversion sync uses TEZ/TEP
+  ISR (ESP32-S3 has no ETM in HAL).
+
+compatible: "zephyr,motor-sensor-encoder-esp32s3"
+
+include: "zephyr,motor-sensor-encoder-common.yaml"
+
+properties:
+  st,adc:
+    type: phandle
+    required: true
+    description: ADC node (e.g. &adc0); may be status disabled for the Zephyr ADC driver.
+
+  adc-channel:
+    type: int
+    required: true
+    description: SAR channel index (0..9, SoC-dependent).
+
+  adc-attenuation-db:
+    type: int
+    default: 11
+    description: Approximate attenuation in dB (0, 2, 6, 11) for the channel.
+
+  digi-block-samples:
+    type: int
+    default: 1
+    description: Samples per EOF block (minimum 1).
+
+  adc-digi-sample-freq-hz:
+    type: int
+    default: 20000
+    description: SAR digital controller sample frequency (Hz).
+
+  zephyr,mcpwm-sync-irq-priority:
+    type: int
+    description: Priority for MCPWM TEZ/TEP ISR (esp_intr_alloc). Falls back to Kconfig if unset.
+
+  sync-actuator:
+    type: phandle
+    required: true
+
+  mcpwm-sync:
+    type: phandle
+    required: true
+    description: MCPWM instance used by the power stage (for TEZ/TEP ISR).
+
+  mcpwm-sync-index:
+    type: int
+    default: 0
+    description: 0 = MCPWM0, 1 = MCPWM1 (must match the stage).
+
+  sync-timer-id:
+    type: int
+    default: 0
+    description: MCPWM timer index for TEZ/TEP sync ISR (ISR only; Digi ADC runs continuously).
+
+  sync-edge:
+    type: string
+    default: "tez"
+    enum:
+      - tez
+      - tep
+    description: Timer empty (tez) or timer full (tep).
+
+  zephyr,adc-dma-priority:
+    type: int
+    description: Optional GDMA/ADC ISR priority (reserved for future use).

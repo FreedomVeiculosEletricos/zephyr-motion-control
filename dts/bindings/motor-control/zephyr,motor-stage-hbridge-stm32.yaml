@@ -1,0 +1,54 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  STM32 motor power stage using ST LL timer APIs directly (no Zephyr PWM on the
+  hot path). Each entry in pwm-channels selects one timer channel (1..4) that
+  drives one half-bridge leg: either as a complementary pair (CHx + CHxN) on an
+  advanced timer (TIM1/TIM8) when stm32,complementary-pwm is set, or as a single
+  PWM output on that channel when stm32,complementary-pwm is unset (independent
+  PWM, e.g. TIM3).
+
+  Use one timer instance for all legs so ADC TRGO and switching stay synchronized.
+  Disable the Zephyr pwm child node for the same timer (status = "disabled") so
+  the peripheral is not claimed twice.
+
+compatible: "zephyr,motor-stage-hbridge-stm32"
+
+include: ["zephyr,motor-stage-hbridge-common.yaml", pinctrl-device.yaml]
+
+properties:
+  st,pwm-timer:
+    type: phandle
+    required: true
+    description: |
+      Timer instance (e.g. &timers1). Must match adc-trigger-timer on the
+      motor-sensor-encoder-stm32 node for TRGO-synchronous ADC.
+
+  pwm-channels:
+    type: array
+    required: true
+    description: |
+      Timer channel index per half-bridge leg (1..4), one cell per leg, e.g.
+      pwm-channels = <1 2>; Length 1 = unidirectional magnitude on a single leg;
+      length 2 = full-bridge DC (bidirectional); length 3 = reserved for future
+      use on the same timer.
+
+  stm32,complementary-pwm:
+    type: boolean
+    description: |
+      If true, enable CHx and CHxN with dead-time (TIM1 or TIM8 on STM32G4). If
+      false, drive only the listed channel outputs (independent PWM, suitable for
+      TIM3 and similar timers without complementary pins).
+
+  trgo-source:
+    type: string
+    required: true
+    enum:
+      - update
+      - reset
+      - enable
+      - compare_pulse
+    description: |
+      TIM TRGO output selection (maps to STM32 LL_TIM_TRGO_*). Use update for
+      edge-aligned PWM so each period triggers one ADC sequence.

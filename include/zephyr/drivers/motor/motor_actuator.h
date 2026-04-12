@@ -7,7 +7,7 @@
 #ifndef ZEPHYR_INCLUDE_DRIVERS_MOTOR_MOTOR_ACTUATOR_H_
 #define ZEPHYR_INCLUDE_DRIVERS_MOTOR_MOTOR_ACTUATOR_H_
 
-#include <zephyr/drivers/motor/motor_types.h>
+#include <zephyr/subsys/motor/motor_types.h>
 #include <zephyr/device.h>
 
 #ifdef __cplusplus
@@ -29,6 +29,12 @@ extern "C" {
  *   - Dual H-bridge       (stepper, 2-phase)
  *   - 3-phase inverter    (BLDC, PMSM, AC induction)
  *   - 6-phase dual 3-phase (advanced, future)
+ *
+ * Half-bridge power stages (STM32 reference): up to three complementary legs may
+ * share one timer (one counter / period) so all legs stay time-aligned. The
+ * static config field n_phases counts those legs for the active build (1 = one
+ * half-bridge / unidirectional magnitude, 2 = full-bridge DC / bidirectional,
+ * 3 = reserved for future multi-leg topologies on the same API).
  *
  * The controller does not need to know the phase count — it
  * writes a voltage vector (Vα, Vβ) and the backend maps this
@@ -59,7 +65,7 @@ enum motor_stage_topology {
  */
 struct motor_stage_config {
 	enum motor_stage_topology topology;
-	uint8_t n_phases;       /* 1, 2, or 3                           */
+	uint8_t n_phases;       /* Half-bridge legs driven: 1, 2, or 3   */
 	uint32_t pwm_period_ns; /* PWM period (sets switching frequency) */
 	uint32_t deadtime_rising_ns;
 	uint32_t deadtime_falling_ns;
@@ -67,6 +73,47 @@ struct motor_stage_config {
 	float v_bus_ov_thresh; /* overvoltage fault threshold (V)      */
 	float v_bus_uv_thresh; /* undervoltage fault threshold (V)     */
 	float i_peak_limit;    /* peak phase current limit (A)         */
+};
+
+/** Max phases for @ref motor_actuator_cmd DUTY_DIRECT payload. */
+#define MOTOR_ACTUATOR_CMD_DUTY_MAX 6
+
+/**
+ * @brief Discriminant for @ref motor_actuator_cmd — how to interpret the union.
+ *
+ * Backends map each kind to PWM/SVPWM or pass-through duty. αβ and d/q are
+ * typically normalised (e.g. ±1); exact scaling is backend-defined.
+ */
+enum motor_actuator_cmd_kind {
+	/** Stationary frame (Clarke): two components, e.g. SVPWM or 1-phase magnitude. */
+	MOTOR_ACTUATOR_CMD_ALPHA_BETA = 0,
+	/** Rotating frame (Park): d/q voltage or duty command — requires backend support. */
+	MOTOR_ACTUATOR_CMD_VD_VQ,
+	/** Raw per-phase duty [0.0, 1.0], length @c u.duty.n (6-step, open-loop, etc.). */
+	MOTOR_ACTUATOR_CMD_DUTY_DIRECT,
+};
+
+/**
+ * @brief Unified actuator command (enum + union, no indirection).
+ *
+ * Produced by @ref motor_algo_ops.inner_step and consumed by @ref motor_actuator_set_command.
+ */
+struct motor_actuator_cmd {
+	enum motor_actuator_cmd_kind kind;
+	union {
+		struct {
+			float valpha;
+			float vbeta;
+		} ab;
+		struct {
+			float vd;
+			float vq;
+		} dq;
+		struct {
+			uint8_t n;
+			float duty[MOTOR_ACTUATOR_CMD_DUTY_MAX];
+		} duty;
+	} u;
 };
 
 /* ------------------------------------------------------------------ */
@@ -84,7 +131,7 @@ struct motor_stage_config {
  *   1. Call motor_sensor_update() to latch the ADC sample.
  *   2. Call motor_sensor_get() to read sensor_output_t.
  *   3. Run the current-loop algorithm.
- *   4. Call motor_actuator_set_vector() with the new voltage vector.
+ *   4. Fill @ref motor_actuator_cmd and call motor_actuator_set_command().
  *
  * @param dev        Power stage device handle.
  * @param user_data  Pointer registered with set_control_callback.
@@ -150,20 +197,16 @@ struct motor_actuator_ops {
 	int (*disable)(const struct device *dev);
 
 	/**
-	 * @brief Apply a voltage vector to the power stage (ISR-safe).
+	 * @brief Apply a command to the power stage (ISR-safe).
 	 *
-	 * The backend maps (Vα, Vβ) to per-phase duties using SVPWM
-	 * (3-phase) or equivalent modulation.  For a 1-phase H-bridge,
-	 * only Valpha is used (Vbeta is ignored).
+	 * Dispatches on @ref motor_actuator_cmd.kind: αβ / d/q / raw duty per backend.
+	 * Unsupported kinds return -ENOTSUP.
 	 *
-	 * Updates take effect atomically at the next PWM reload event.
-	 *
-	 * @param dev     Power stage device.
-	 * @param valpha  Alpha-axis voltage, normalised [−1.0, +1.0].
-	 * @param vbeta   Beta-axis voltage,  normalised [−1.0, +1.0].
+	 * @param dev  Power stage device.
+	 * @param cmd  Command payload (must not be NULL).
 	 * @retval 0 on success, negative errno on failure.
 	 */
-	int (*set_vector)(const struct device *dev, float valpha, float vbeta);
+	int (*set_command)(const struct device *dev, const struct motor_actuator_cmd *cmd);
 
 	/**
 	 * @brief Apply per-phase duty cycles directly (ISR-safe).
@@ -292,6 +335,12 @@ struct motor_actuator_ops {
 	 * @retval -EIO   if STO self-test failed (path fault detected).
 	 */
 	int (*sto_release)(const struct device *dev, uint32_t *flags);
+
+	/**
+	 * @brief Invoke the registered control callback from an external sync ISR
+	 * (e.g. ADC end-of-conversion). NULL if the heartbeat is only timer-driven.
+	 */
+	void (*invoke_control_callback)(const struct device *dev);
 };
 
 /* ------------------------------------------------------------------ */
@@ -312,11 +361,26 @@ static inline int motor_actuator_disable(const struct device *dev)
 	return ops->disable(dev);
 }
 
-static inline int motor_actuator_set_vector(const struct device *dev, float valpha, float vbeta)
+static inline int motor_actuator_set_command(const struct device *dev,
+					     const struct motor_actuator_cmd *cmd)
 {
 	const struct motor_actuator_ops *ops = dev->api;
 
-	return ops->set_vector(dev, valpha, vbeta);
+	return ops->set_command(dev, cmd);
+}
+
+/**
+ * @brief Convenience: αβ command (normalised, same as legacy set_vector).
+ */
+static inline int motor_actuator_set_vector(const struct device *dev, float valpha, float vbeta)
+{
+	const struct motor_actuator_cmd cmd = {
+		.kind = MOTOR_ACTUATOR_CMD_ALPHA_BETA,
+		.u.ab.valpha = valpha,
+		.u.ab.vbeta = vbeta,
+	};
+
+	return motor_actuator_set_command(dev, &cmd);
 }
 
 static inline int motor_actuator_set_duty(const struct device *dev, const float *duty, uint8_t n)
@@ -383,6 +447,15 @@ static inline int motor_actuator_sto_release(const struct device *dev, uint32_t 
 	const struct motor_actuator_ops *ops = dev->api;
 
 	return ops->sto_release(dev, flags);
+}
+
+static inline void motor_actuator_invoke_control_callback(const struct device *dev)
+{
+	const struct motor_actuator_ops *ops = dev->api;
+
+	if ((ops != NULL) && (ops->invoke_control_callback != NULL)) {
+		ops->invoke_control_callback(dev);
+	}
 }
 
 /**

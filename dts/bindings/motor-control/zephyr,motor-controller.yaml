@@ -15,10 +15,11 @@ description: |
   sensor and actuator device handles from these phandles at compile
   time, so no manual device lookup is needed in application code.
 
-  Motor physical constants (Rs, Ld, Lq, flux-linkage, pole-pairs) are
-  stored here and passed to the algorithm backend at init. Control
-  gains (Kp, Ki) are runtime parameters in motor_ctrl_params and are
-  not stored in the DT.
+  Motor physical constants (Rs, Ld, Lq, flux-linkage, pole-pairs) and
+  shell limits (current, speed, rates) come from this node. DC inner-loop
+  gains may be set via optional dc-current-*-milli properties; the
+  subsystem expands them at build time — applications do not construct
+  motor_ctrl_params manually for DT-driven motors.
 
 compatible: "zephyr,motor-controller"
 
@@ -30,7 +31,8 @@ properties:
     required: true
     description: |
       Sensor backend device node. Must be compatible with one of:
-        zephyr,motor-sensor-encoder
+        zephyr,motor-sensor-encoder-stm32
+        zephyr,motor-sensor-encoder-esp32s3
         zephyr,motor-sensor-hall
         zephyr,motor-sensor-resolver
         zephyr,motor-sensor-sensorless
@@ -40,7 +42,8 @@ properties:
     required: true
     description: |
       Power stage backend device node. Must be compatible with one of:
-        zephyr,motor-stage-hbridge
+        zephyr,motor-stage-hbridge-stm32
+        zephyr,motor-stage-hbridge-esp32s3
         zephyr,motor-stage-3ph-inverter
 
   algorithm:
@@ -50,6 +53,7 @@ properties:
       - "foc"        # Field-Oriented Control (PMSM / BLDC sinusoidal)
       - "6step"      # Trapezoidal 6-step commutation (BLDC)
       - "openloop"   # Open-loop voltage/duty (commissioning, brushed)
+      - "dc-torque"  # DC brushed: scalar current PI (torque via Kt)
       - "vf-scalar"  # V/f scalar control (AC induction)
       - "stepdir"    # Step/direction (stepper open or closed loop)
     description: |
@@ -58,6 +62,37 @@ properties:
       firmware image (CONFIG_MOTOR_ALGO_FOC, CONFIG_MOTOR_ALGO_6STEP,
       etc.). Selecting an algorithm not compiled in causes a build
       error.
+
+  dc-kt-mnm-per-a:
+    type: int
+    default: 0
+    description: |
+      DC motor torque constant in millinewton-metre per ampere (mN·m/A).
+      Required for algorithm "dc-torque" (non-zero). Example: 50 means 0.05 N·m/A.
+
+  dc-current-kp-milli:
+    type: int
+    default: 500
+    description: |
+      DC torque algorithm — current-loop Kp multiplied by 1000 (500 = 0.5).
+
+  dc-current-ki-milli:
+    type: int
+    default: 2000000
+    description: |
+      DC torque algorithm — current-loop Ki multiplied by 1000 (2000000 = 2000).
+
+  dc-current-out-min-milli:
+    type: int
+    default: -1000
+    description: |
+      Normalised output lower saturation, multiplied by 1000 (-1000 = -1.0).
+
+  dc-current-out-max-milli:
+    type: int
+    default: 1000
+    description: |
+      Normalised output upper saturation, multiplied by 1000 (1000 = 1.0).
 
   pole-pairs:
     type: int

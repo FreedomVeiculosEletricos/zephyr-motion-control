@@ -8,6 +8,7 @@
 #define ZEPHYR_INCLUDE_SUBSYS_MOTOR_MOTOR_SUBSYS_H_
 
 #include <zephyr/subsys/motor/motor.h>
+#include <zephyr/subsys/motor/motor_dt.h>
 #include <zephyr/device.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
@@ -120,8 +121,11 @@ struct motor_subsys_entry {
 	/** Algorithm private state buffer. */
 	void *algo_data;
 
-	/** Default parameters baked in at compile time (may be NULL). */
-	const struct motor_ctrl_params *default_params;
+	/**
+	 * Initial parameters — from @ref MOTOR_SUBSYS_DEFINE_DT (Devicetree) or
+	 * supplied explicitly; must not be NULL.
+	 */
+	const struct motor_ctrl_params *params;
 
 	/** DT node identifier string (e.g. "motor0") — for shell/debug. */
 	const char *label;
@@ -139,7 +143,7 @@ struct motor_subsys_entry {
  * @param _actuator  Power stage backend device pointer.
  * @param _algo      Algorithm vtable pointer.
  * @param _algo_data Algorithm private state pointer.
- * @param _params    Default parameter struct pointer (or NULL).
+ * @param _params    Pointer to @ref motor_ctrl_params (required).
  * @param _label     DT label string.
  */
 #define MOTOR_SUBSYS_DEFINE(_name, _ctrl, _sensor, _actuator, _algo, _algo_data, _params, _label)  \
@@ -149,28 +153,30 @@ struct motor_subsys_entry {
 		.actuator = (_actuator),                                                           \
 		.algo = (_algo),                                                                   \
 		.algo_data = (_algo_data),                                                         \
-		.default_params = (_params),                                                       \
+		.params = (_params),                                                               \
 		.label = (_label),                                                                 \
 	}
 
 /**
- * @brief Convenience macro: define entry from DT node label.
+ * @brief Register a motor-controller instance from Devicetree (dc-torque algorithm).
  *
- * Resolves sensor and actuator devices from DT phandles automatically.
- * Requires that sensor and actuator DT nodes have been defined and
- * their drivers initialised before SYS_INIT(motor_subsys_init).
+ * Expands @ref motor_ctrl_params and @ref motor_algo_dc_torque_data from the
+ * `zephyr,motor-controller` node using @ref MOTOR_CTRL_PARAMS_INITIALIZER and
+ * @ref MOTOR_DC_TORQUE_DATA_INITIALIZER — no application-side parameter structs.
  *
- * @param _nodelabel  DT node label (unquoted, e.g. motor0).
- * @param _ctrl       Pre-declared motor_ctrl instance.
- * @param _algo       Algorithm vtable.
- * @param _algo_data  Algorithm state buffer.
- * @param _params     Default params or NULL.
+ * @param _nodelabel  DT node label (unquoted), e.g. motor_brushed.
+ * @param _ctrl       Pre-declared @ref motor_ctrl instance (MOTOR_CTRL_DEFINE).
  */
-#define MOTOR_SUBSYS_DEFINE_DT(_nodelabel, _ctrl, _algo, _algo_data, _params)                      \
+#define MOTOR_SUBSYS_DEFINE_DT(_nodelabel, _ctrl)                                                  \
+	static const struct motor_ctrl_params UTIL_CAT(_motor_params_, _nodelabel) =                \
+		MOTOR_CTRL_PARAMS_INITIALIZER(DT_NODELABEL(_nodelabel));                             \
+	static struct motor_algo_dc_torque_data UTIL_CAT(_motor_dc_, _nodelabel) =                   \
+		MOTOR_DC_TORQUE_DATA_INITIALIZER(DT_NODELABEL(_nodelabel));                           \
 	MOTOR_SUBSYS_DEFINE(motor_entry_##_nodelabel, (_ctrl),                                     \
 			    DEVICE_DT_GET(DT_PHANDLE(DT_NODELABEL(_nodelabel), sensor)),           \
 			    DEVICE_DT_GET(DT_PHANDLE(DT_NODELABEL(_nodelabel), actuator)),         \
-			    (_algo), (_algo_data), (_params), STRINGIFY(_nodelabel))
+			    &motor_algo_dc_torque, &UTIL_CAT(_motor_dc_, _nodelabel),                 \
+			    &UTIL_CAT(_motor_params_, _nodelabel), STRINGIFY(_nodelabel))
 
 /* ------------------------------------------------------------------ */
 /* Subsystem init and instance discovery                               */
@@ -244,6 +250,8 @@ enum motor_group_state {
 	MOTOR_GROUP_STOPPING = 3, /* disable in progress                */
 	MOTOR_GROUP_FAULT = 4,    /* one or more members in FAULT       */
 };
+
+struct motor_group;
 
 /**
  * @brief Group-level state/fault callback.

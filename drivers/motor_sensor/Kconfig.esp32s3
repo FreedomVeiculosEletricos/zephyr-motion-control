@@ -1,0 +1,27 @@
+# Copyright (c) 2026 Freedom Veiculos Eletricos
+# SPDX-License-Identifier: UNLICENSED
+
+# ESP32-S3: SAR ADC digital + GDMA; MCPWM TEZ/TEP sync (motor-sensor-encoder-esp32s3).
+
+config MOTOR_SENSOR_ENCODER_ESP32S3
+	bool "ESP32-S3 encoder + ADC Digi EOF (zephyr,motor-sensor-encoder-esp32s3)"
+	depends on SOC_SERIES_ESP32S3
+	depends on GPIO
+	select DMA
+	depends on ADC
+	help
+	  Current sense via SAR ADC digital mode + GDMA; EOF invokes sync-actuator callback;
+	  MCPWM sync uses TEZ/TEP ISR (no ETM on ESP32-S3).
+
+config MOTOR_SENSOR_ENCODER_ESP32S3_INIT_PRIORITY
+	int "Init priority for motor-sensor-encoder-esp32s3"
+	default 46
+	depends on MOTOR_SENSOR_ENCODER_ESP32S3
+
+config MOTOR_ESP32S3_MCPWM_SYNC_IRQ_PRIORITY
+	int "esp_intr_alloc priority for MCPWM TEZ/TEP ISR (ESP32-S3 sensor)"
+	default 2
+	range 1 15
+	depends on MOTOR_SENSOR_ENCODER_ESP32S3
+	help
+	  Used only when zephyr,mcpwm-sync-irq-priority is not set in devicetree.

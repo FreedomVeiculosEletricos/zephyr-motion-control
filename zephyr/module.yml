@@ -21,3 +21,5 @@ build:
     dts_root: .
 samples:
   - samples
+tests:
+  - tests

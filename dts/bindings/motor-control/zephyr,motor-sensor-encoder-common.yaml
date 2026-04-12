@@ -1,0 +1,45 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# Shared motion/calibration fields for encoder + current backends.
+# SoC-specific bindings include this fragment and add ADC/PWM/timer wiring.
+
+include: base.yaml
+
+properties:
+  encoder-timer:
+    type: phandle
+    required: false
+    description: |
+      Timer peripheral configured as a counter (quadrature encoder mode).
+      Optional for bring-up with current feedback only; position/speed stay invalid.
+
+  encoder-cpr:
+    type: int
+    required: true
+    description: |
+      Encoder counts per revolution after quadrature decoding.
+      For a 1024 CPR encoder with 4x decoding: encoder-cpr = <4096>.
+
+  pole-pairs:
+    type: int
+    required: true
+    description: |
+      Motor pole pairs. Used to convert mechanical angle to electrical
+      angle: theta_elec = theta_mech * pole-pairs.
+      For a DC brushed motor with no Park transform: pole-pairs = <1>.
+
+  index-gpios:
+    type: phandle-array
+    description: |
+      Optional encoder index (Z) pulse GPIO for absolute-zero alignment.
+      When present, the backend performs an index search at enable() and
+      sets valid_theta = true only after the index pulse is detected.
+
+  current-offset-ua:
+    type: array
+    description: |
+      Per-channel current sense offset in microamperes at zero current.
+      Applied during calibration; overrides runtime offset measurement when present.
+      Length is defined by the leaf binding (e.g. matches `io-channels` on the
+      generic Zephyr ADC path).

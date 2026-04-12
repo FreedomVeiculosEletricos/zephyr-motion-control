@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Freedom Veiculos Eletricos
+# SPDX-License-Identifier: UNLICENSED
+
+# SoC-specific motor actuators (STM32 LL, ESP32-S3, …).
+
+menu "Motor actuators"
+
+rsource "Kconfig.stm32"
+rsource "Kconfig.esp32s3"
+
+endmenu

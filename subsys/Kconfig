@@ -1,8 +1,72 @@
-# Copyright (c) 2024-2026 Freedom Veiculos Eletricos
+# Copyright (c) 2026 Freedom Veiculos Eletricos
 # SPDX-License-Identifier: UNLICENSED
 
-menu "Subsystems and OS Services"
+menu "Motor control subsystem"
 
-#rsource "moduleFoo/Kconfig"
+config MOTOR_CONTROL_TEST_API
+	bool "Motor control subsystem for ZTEST (fake devices, no hardware drivers)"
+	depends on ZTEST
+	default n
+	help
+	  Relaxes MOTOR_CONTROL_LIB dependencies so tests can link motor_ctrl with
+	  in-tree fake devices only. Do not enable in production firmware.
+
+config MOTOR_CONTROL_LIB
+	bool "Motor controller core and application API"
+	default y
+	depends on MOTOR_CONTROL_TEST_API || \
+		   (((MOTOR_STAGE_HBRIDGE_STM32 || MOTOR_STAGE_HBRIDGE_ESP32S3) && \
+		    (MOTOR_SENSOR_ENCODER_STM32 || MOTOR_SENSOR_ENCODER_ESP32S3)))
+	help
+	  Builds motor_ctrl, motor_* API, and the dc-torque algorithm backend.
+
+config MOTOR_CTRL_OUTER_LOOPS
+	bool "Run speed/position loops in a dedicated thread (Rates 1–2)"
+	default y
+	depends on MOTOR_CONTROL_LIB
+	help
+	  When enabled, only the current loop runs in ISR; outer loops use the
+	  double-buffered sense data and a mutex.
+
+if MOTOR_CTRL_OUTER_LOOPS
+
+config MOTOR_CTRL_OUTER_STACK_SIZE
+	int "Outer loop thread stack size (bytes)"
+	default 1024
+
+config MOTOR_CTRL_OUTER_THREAD_PRIO
+	int "Outer loop thread priority"
+	default 5
+
+endif # MOTOR_CTRL_OUTER_LOOPS
+
+config MOTOR_SUBSYS
+	bool "Motor multi-instance DT registration (motor_subsys_* API)"
+	depends on MOTOR_CONTROL_LIB
+	default y
+	help
+	  Iterable MOTOR_SUBSYS_DEFINE entries, motor_subsys_init(), and
+	  motor_subsys_get_by_label() / get_by_index().
+
+if MOTOR_SUBSYS
+
+config MOTOR_SUBSYS_AUTO_INIT
+	bool "Invoke motor_subsys_init() from SYS_INIT"
+	default y
+	help
+	  Runs after kernel and device init so sensor/actuator devices are ready.
+
+config MOTOR_SUBSYS_INIT_PRIORITY
+	int "motor_subsys_init SYS_INIT priority (APPLICATION level)"
+	default 99
+	range 0 99999
+	depends on MOTOR_SUBSYS_AUTO_INIT
+
+config MOTOR_MAX_INSTANCES
+	int "Maximum registered motor instances"
+	default 8
+	range 1 32
+
+endif # MOTOR_SUBSYS
 
 endmenu

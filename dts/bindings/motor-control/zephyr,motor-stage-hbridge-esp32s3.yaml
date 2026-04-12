@@ -1,0 +1,36 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  ESP32-S3 H-bridge using MCPWM (direct HAL, not LEDC). ADC synchronization is handled
+  in the sensor driver (TEZ/TEP ISR + ADC Digi), not in this node.
+
+compatible: "zephyr,motor-stage-hbridge-esp32s3"
+
+include: ["zephyr,motor-stage-hbridge-common.yaml", pinctrl-device.yaml]
+
+properties:
+  mcpwm:
+    type: phandle
+    required: true
+    description: MCPWM instance (e.g. &mcpwm0).
+
+  mcpwm-index:
+    type: int
+    required: true
+    description: MCPWM group index (0 = MCPWM0, 1 = MCPWM1).
+
+  timer-id:
+    type: int
+    required: true
+    description: MCPWM timer (0..2). Use 0 for PWM0A/PWM0B H-bridge.
+
+  prescale:
+    type: int
+    default: 1
+    description: Global MCPWM prescaler (8-bit; see espressif,esp32-mcpwm).
+
+  prescale-timer0:
+    type: int
+    default: 0
+    description: Timer prescaler for timer-id.
