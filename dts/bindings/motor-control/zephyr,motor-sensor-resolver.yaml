@@ -22,7 +22,7 @@ properties:
       ADC channels in order:
         [resolver_sin, resolver_cos, i_phase_a, i_phase_b, i_phase_c]
       The current-sense channels follow the same conventions as
-      zephyr,motor-sensor-encoder. The resolver SIN/COS channels must
+      zephyr,motor-sensor-encoder-stm32. The resolver SIN/COS channels must
       be sampled synchronously with the current channels.
 
   io-channel-names:

@@ -1,0 +1,66 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  STM32 encoder + current sense without adc_read() in the ISR: the ADC is
+  programmed for injected (or regular) conversions triggered by the PWM timer
+  TRGO; the ADC EOC ISR latches results and invokes the power-stage control
+  callback (see sync-actuator).
+
+compatible: "zephyr,motor-sensor-encoder-stm32"
+
+include: "zephyr,motor-sensor-encoder-common.yaml"
+
+properties:
+  st,adc:
+    type: phandle
+    required: true
+    description: ADC controller (e.g. &adc1).
+
+  adc-injected:
+    type: boolean
+    description: |
+      If true, use injected group (typical for sync with timer). Default true
+      if property is absent (boolean default in driver).
+
+  adc-channel:
+    type: int
+    required: true
+    description: |
+      SOC ADC channel index for phase-A current (STM32 LL_ADC_CHANNEL_x index
+      as used by Cube — match N in ADCx_INN from the datasheet).
+
+  adc-trigger-timer:
+    type: phandle
+    required: true
+    description: Timer providing TRGO to the ADC external trigger (same as PWM timer).
+
+  adc-ext-trigger-inj:
+    type: int
+    description: |
+      STM32 LL_ADC_INJ_TRIG_EXT_TIMx_TRGO constant for this SoC (injected).
+      If omitted, the driver selects a default for the timer instance (G4).
+
+  sync-actuator:
+    type: phandle
+    required: true
+    description: |
+      Power-stage device whose registered motor_control_cb_t is invoked from
+      the ADC ISR after latching the current sample (timer→ADC→ISR chain).
+
+  zephyr,adc-irq-priority:
+    type: int
+    required: false
+    description: |
+      NVIC priority for the ADC interrupt. If omitted, Kconfig
+      MOTOR_STM32_ADC_IRQ_PRIORITY is used.
+
+  io-channels:
+    type: phandle-array
+    description: |
+      Optional extra channels (e.g. v_bus) for future use; primary current uses
+      adc-channel on st,adc.
+
+  io-channel-names:
+    type: string-array
+    description: Names for optional io-channels.

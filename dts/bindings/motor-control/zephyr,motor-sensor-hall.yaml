@@ -46,7 +46,7 @@ properties:
     type: phandle-array
     description: |
       ADC channels for phase current measurement. Same conventions as
-      zephyr,motor-sensor-encoder io-channels.
+      zephyr,motor-sensor-encoder-stm32 (io-channels / channel naming).
 
   io-channel-names:
     type: string-array
