@@ -89,8 +89,8 @@ properties:
       When both assert, the power stage immediately inhibits all PWM
       outputs in hardware. The controller transitions to
       MOTOR_STATE_STO and motor_fault_cb_t fires.
-      Required for ASIL-B and above. Absence causes motor_sto_arm()
-      to return -ENOTSUP.
+      Required for ASIL-B and above. Absence causes the actuator's
+      sto_arm op to return -ENOTSUP.
       Example:
         sto-gpios = <&gpioe 10 GPIO_ACTIVE_HIGH>,
                     <&gpioe 11 GPIO_ACTIVE_HIGH>;

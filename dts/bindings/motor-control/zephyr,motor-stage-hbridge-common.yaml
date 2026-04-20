@@ -27,8 +27,8 @@ properties:
       Dual-channel Safe Torque Off input GPIOs [STO_CH1, STO_CH2].
       Both channels must be GPIO_ACTIVE_HIGH and interrupt-capable.
       When both assert, PWM outputs are inhibited in hardware.
-      Required for ASIL-B and above. If absent, motor_sto_arm()
-      returns -ENOTSUP.
+      Required for ASIL-B and above. If absent, the actuator's
+      sto_arm op returns -ENOTSUP.
       Example:
         sto-gpios = <&gpiob 10 GPIO_ACTIVE_HIGH>,
                     <&gpiob 11 GPIO_ACTIVE_HIGH>;
