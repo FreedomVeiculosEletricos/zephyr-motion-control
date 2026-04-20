@@ -39,8 +39,9 @@ application source is used; pick the overlay for your hardware:
   only (no bridge reversal). Overlay:
   :file:`boards/nucleo_g474re_stm32_ll_1hb.overlay` (``pwm-channels = <1>;``).
 * **Full bridge / bidirectional** — two legs on the same timer (sign-magnitude).
-  Overlay: :file:`boards/nucleo_g474re_stm32_ll.overlay` (``pwm-channels = <1 2>;``),
-  or use the :file:`../dc_current_full_bridge` sample which defaults to this topology.
+  Overlay: :file:`boards/nucleo_g474re.overlay` (``pwm-channels = <1 2>;``), merged
+  automatically when building for ``nucleo_g474re``, or use the
+  :file:`../dc_current_full_bridge` sample which uses the same overlay.
 
 Optional: set ``stm32,complementary-pwm`` on the stage node for CHx/CHxN with
 dead-time on TIM1/TIM8 (not used on the default TIM3 NUCLEO overlays).
@@ -89,8 +90,7 @@ Build (STM32 LL — full bridge, two half-bridge legs)
 
    west build -b nucleo_g474re path/to/zephyr-motion-control/samples/dc_current -- \
      -DZEPHYR_EXTRA_MODULES=path/to/zephyr-motion-control \
-     -DCONF_FILE=prj_stm32_ll.conf \
-     -DDTC_OVERLAY_FILE=boards/nucleo_g474re_stm32_ll.overlay
+     -DCONF_FILE=prj_stm32_ll.conf
 
 Build (STM32 LL — single half-bridge, unidirectional)
 -----------------------------------------------------

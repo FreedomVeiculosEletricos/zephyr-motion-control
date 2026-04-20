@@ -1,0 +1,17 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only check: west twister -T samples/dc_current (from repo root)
+# with ZEPHYR_EXTRA_MODULES set to this repository.
+
+sample:
+  description: DC brushed current loop (scalar PI) with STM32 LL sensor/stage
+  name: dc_current
+common:
+  tags: motor
+tests:
+  samples.motor.dc_current:
+    build_only: true
+    extra_args: CONF_FILE=prj_stm32_ll.conf
+    integration_platforms:
+      - nucleo_g474re

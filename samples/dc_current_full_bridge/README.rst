@@ -22,5 +22,4 @@ Build (NUCLEO-G474RE, STM32 LL)
 
    west build -b nucleo_g474re path/to/zephyr-motion-control/samples/dc_current_full_bridge -- \
      -DZEPHYR_EXTRA_MODULES=path/to/zephyr-motion-control \
-     -DCONF_FILE=prj_stm32_ll.conf \
-     -DDTC_OVERLAY_FILE=boards/nucleo_g474re_stm32_ll.overlay
+     -DCONF_FILE=prj_stm32_ll.conf

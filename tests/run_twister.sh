@@ -8,6 +8,10 @@
 # Prefer the repo devshell so Twister gets Python ≥3.11 and Zephyr deps (Twister
 # imports datetime.UTC, jsonschema, etc.):
 #   nix develop --accept-flake-config -c bash -c 'export ZEPHYR_BASE="$PWD/deps/zephyr" ZEPHYR_EXTRA_MODULES="$PWD" && ./tests/run_twister.sh -T "$PWD/tests" -p native_sim/native/64'
+#
+# Build motor samples (NUCLEO-G474RE): same env, PATH without ~/.local/bin if host
+# cmake is broken, then:
+#   ... && ./tests/run_twister.sh -T "$PWD/samples" -p nucleo_g474re --build-only
 export NSI_OPT=-O2
 set -euo pipefail
 ZEPHYR_BASE="${ZEPHYR_BASE:?set ZEPHYR_BASE to your Zephyr tree}"
