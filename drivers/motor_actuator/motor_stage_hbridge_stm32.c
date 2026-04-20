@@ -183,30 +183,15 @@ static void oc_set_compare(TIM_TypeDef *tim, uint8_t ch, uint32_t pulse)
 
 static void oc_set_independent_pwm(TIM_TypeDef *tim, uint8_t ch, uint32_t pulse)
 {
-	switch (ch) {
-	case 1U:
-		LL_TIM_OC_SetMode(tim, LL_TIM_CHANNEL_CH1, LL_TIM_OCMODE_PWM1);
-		LL_TIM_OC_SetCompareCH1(tim, pulse);
-		LL_TIM_CC_EnableChannel(tim, LL_TIM_CHANNEL_CH1);
-		break;
-	case 2U:
-		LL_TIM_OC_SetMode(tim, LL_TIM_CHANNEL_CH2, LL_TIM_OCMODE_PWM1);
-		LL_TIM_OC_SetCompareCH2(tim, pulse);
-		LL_TIM_CC_EnableChannel(tim, LL_TIM_CHANNEL_CH2);
-		break;
-	case 3U:
-		LL_TIM_OC_SetMode(tim, LL_TIM_CHANNEL_CH3, LL_TIM_OCMODE_PWM1);
-		LL_TIM_OC_SetCompareCH3(tim, pulse);
-		LL_TIM_CC_EnableChannel(tim, LL_TIM_CHANNEL_CH3);
-		break;
-	case 4U:
-		LL_TIM_OC_SetMode(tim, LL_TIM_CHANNEL_CH4, LL_TIM_OCMODE_PWM1);
-		LL_TIM_OC_SetCompareCH4(tim, pulse);
-		LL_TIM_CC_EnableChannel(tim, LL_TIM_CHANNEL_CH4);
-		break;
-	default:
-		break;
+	uint32_t mask = tim_ch_mask(ch);
+
+	if (mask == 0U) {
+		return;
 	}
+
+	LL_TIM_OC_SetMode(tim, mask, LL_TIM_OCMODE_PWM1);
+	oc_set_compare(tim, ch, pulse);
+	LL_TIM_CC_EnableChannel(tim, mask);
 }
 
 static void oc_set_complementary_pwm(TIM_TypeDef *tim, uint8_t ch, uint32_t pulse)
@@ -319,15 +304,6 @@ static void tim_hbridge_set_vector_independent(TIM_TypeDef *tim, const uint8_t *
 
 	if (coast) {
 		mag = 0U;
-	} else if (n_ch == 1U) {
-		float a = valpha;
-
-		if (a > 1.0f) {
-			a = 1.0f;
-		} else if (a < -1.0f) {
-			a = -1.0f;
-		}
-		mag = (uint32_t)(fabsf(a) * (float)max_duty);
 	} else {
 		float a = valpha;
 
@@ -373,13 +349,6 @@ static void tim_hbridge_set_vector_independent(TIM_TypeDef *tim, const uint8_t *
 	}
 }
 
-static void tim_hbridge_set_vector_complementary(TIM_TypeDef *tim, const uint8_t *ch, uint8_t n_ch,
-						 float valpha, bool coast)
-{
-	/* Same compare mapping as independent; CHxN follows hardware. */
-	tim_hbridge_set_vector_independent(tim, ch, n_ch, valpha, coast);
-}
-
 static void tim_enable_main_output(TIM_TypeDef *tim, bool enable)
 {
 	if ((tim == TIM1) || (tim == TIM8)) {
@@ -416,13 +385,8 @@ static int hbridge_stm32_set_vector(const struct device *dev, float valpha, floa
 		coast = true;
 	}
 
-	if (cfg->complementary) {
-		tim_hbridge_set_vector_complementary(cfg->tim, cfg->pwm_ch, cfg->n_half_bridges, valpha,
-						       coast);
-	} else {
-		tim_hbridge_set_vector_independent(cfg->tim, cfg->pwm_ch, cfg->n_half_bridges, valpha,
-						     coast);
-	}
+	tim_hbridge_set_vector_independent(cfg->tim, cfg->pwm_ch, cfg->n_half_bridges, valpha,
+					   coast);
 
 	return 0;
 }
@@ -549,13 +513,7 @@ static int hbridge_stm32_disable_outputs(const struct device *dev)
 {
 	const struct motor_hbridge_stm32_config *cfg = dev->config;
 
-	if (cfg->complementary) {
-		tim_hbridge_set_vector_complementary(cfg->tim, cfg->pwm_ch, cfg->n_half_bridges, 0.0f,
-						     true);
-	} else {
-		tim_hbridge_set_vector_independent(cfg->tim, cfg->pwm_ch, cfg->n_half_bridges, 0.0f,
-						   true);
-	}
+	tim_hbridge_set_vector_independent(cfg->tim, cfg->pwm_ch, cfg->n_half_bridges, 0.0f, true);
 
 	return 0;
 }
