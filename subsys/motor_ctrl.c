@@ -14,6 +14,14 @@
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 
+/*
+ * motor_ctrl is the scheduling shell. It must stay algorithm-agnostic so a new
+ * algorithm or the upcoming N-block pipeline can plug in without touching this
+ * file. Do not include any concrete algorithm header (e.g. motor_algo_dc_torque.h)
+ * or hard-code algorithm-specific behaviour here — go through the motor_algo_ops
+ * vtable only.
+ */
+
 static void motor_ctrl_current_isr(const struct device *actuator, void *user_data);
 
 #if IS_ENABLED(CONFIG_MOTOR_CTRL_OUTER_LOOPS)
