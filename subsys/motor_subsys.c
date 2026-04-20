@@ -320,15 +320,12 @@ int motor_group_self_test(struct motor_group *group, uint32_t *faults)
 	return 0;
 }
 
-int motor_group_enable(struct motor_group *group, k_timeout_t timeout)
+/*
+ * Move the group from IDLE to ALIGNING and call motor_enable() on every
+ * member. On failure all members are estopped and the group lands in FAULT.
+ */
+static int group_enable_preflight(struct motor_group *group)
 {
-	int64_t deadline = deadline_from_timeout(timeout);
-	int ret;
-
-	if ((group == NULL) || (group->count == 0U)) {
-		return -EINVAL;
-	}
-
 	k_spinlock_key_t key = k_spin_lock(&group->lock);
 
 	if (group->state != MOTOR_GROUP_IDLE) {
@@ -338,9 +335,8 @@ int motor_group_enable(struct motor_group *group, k_timeout_t timeout)
 
 	k_spin_unlock(&group->lock, key);
 
-	ret = members_all_in_state(group, MOTOR_STATE_IDLE) ? 0 : -EBUSY;
-	if (ret != 0) {
-		return ret;
+	if (!members_all_in_state(group, MOTOR_STATE_IDLE)) {
+		return -EBUSY;
 	}
 
 	key = k_spin_lock(&group->lock);
@@ -348,16 +344,37 @@ int motor_group_enable(struct motor_group *group, k_timeout_t timeout)
 	k_spin_unlock(&group->lock, key);
 
 	for (uint8_t i = 0; i < group->count; i++) {
-		ret = motor_enable(group->members[i]);
-		if (ret != 0) {
-			for (uint8_t j = 0; j < group->count; j++) {
-				motor_estop(group->members[j]);
-			}
-			key = k_spin_lock(&group->lock);
-			group->state = MOTOR_GROUP_FAULT;
-			k_spin_unlock(&group->lock, key);
-			return ret;
+		int ret = motor_enable(group->members[i]);
+
+		if (ret == 0) {
+			continue;
 		}
+
+		for (uint8_t j = 0; j < group->count; j++) {
+			motor_estop(group->members[j]);
+		}
+		key = k_spin_lock(&group->lock);
+		group->state = MOTOR_GROUP_FAULT;
+		k_spin_unlock(&group->lock, key);
+		return ret;
+	}
+
+	return 0;
+}
+
+int motor_group_enable(struct motor_group *group, k_timeout_t timeout)
+{
+	int64_t deadline = deadline_from_timeout(timeout);
+	int ret;
+	k_spinlock_key_t key;
+
+	if ((group == NULL) || (group->count == 0U)) {
+		return -EINVAL;
+	}
+
+	ret = group_enable_preflight(group);
+	if (ret != 0) {
+		return ret;
 	}
 
 	while (k_uptime_ticks() < deadline) {
@@ -394,40 +411,15 @@ int motor_group_enable_async(struct motor_group *group)
 {
 	struct motor_group_enable_async_ctx *slot;
 	int ret;
+	k_spinlock_key_t key;
 
 	if ((group == NULL) || (group->count == 0U)) {
 		return -EINVAL;
 	}
 
-	k_spinlock_key_t key = k_spin_lock(&group->lock);
-
-	if (group->state != MOTOR_GROUP_IDLE) {
-		k_spin_unlock(&group->lock, key);
-		return -EBUSY;
-	}
-
-	k_spin_unlock(&group->lock, key);
-
-	ret = members_all_in_state(group, MOTOR_STATE_IDLE) ? 0 : -EBUSY;
+	ret = group_enable_preflight(group);
 	if (ret != 0) {
 		return ret;
-	}
-
-	key = k_spin_lock(&group->lock);
-	group->state = MOTOR_GROUP_ALIGNING;
-	k_spin_unlock(&group->lock, key);
-
-	for (uint8_t i = 0; i < group->count; i++) {
-		ret = motor_enable(group->members[i]);
-		if (ret != 0) {
-			for (uint8_t j = 0; j < group->count; j++) {
-				motor_estop(group->members[j]);
-			}
-			key = k_spin_lock(&group->lock);
-			group->state = MOTOR_GROUP_FAULT;
-			k_spin_unlock(&group->lock, key);
-			return ret;
-		}
 	}
 
 	slot = alloc_enable_async_slot();
