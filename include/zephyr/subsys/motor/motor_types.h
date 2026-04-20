@@ -120,6 +120,30 @@ enum motor_accel_profile {
 	MOTOR_ACCEL_SCURVE = 2,      /* jerk-limited S-curve                   */
 };
 
+/**
+ * @brief Pipeline stage at which a control block is dispatched.
+ *
+ * Each stage has an independent tick counter inside motor_ctrl. Blocks declare
+ * @c period_div: a block runs once every @c period_div ticks of its own stage.
+ * The base rate for INNER_ISR is set by the actuator driver (PWM ISR rate);
+ * outer / supervision base rates are set by their respective threads.
+ *
+ * Today the controller implements three slots (inner, outer_0, outer_1) plus a
+ * future supervision rate. This enum is the contract for the upcoming N-block
+ * pipeline; the 3-slot vtable maps as:
+ *
+ *   motor_algo_ops.inner_step    -> MOTOR_STAGE_INNER_ISR
+ *   motor_algo_ops.outer_step_0  -> MOTOR_STAGE_OUTER_FAST
+ *   motor_algo_ops.outer_step_1  -> MOTOR_STAGE_OUTER_SLOW
+ */
+enum motor_pipeline_stage {
+	MOTOR_STAGE_INNER_ISR = 0,
+	MOTOR_STAGE_OUTER_FAST = 1,
+	MOTOR_STAGE_OUTER_SLOW = 2,
+	MOTOR_STAGE_SUPERVISION = 3,
+	MOTOR_STAGE_COUNT,
+};
+
 struct motor_ctrl;
 
 /**
