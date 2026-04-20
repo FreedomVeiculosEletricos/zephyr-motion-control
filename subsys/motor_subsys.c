@@ -101,10 +101,8 @@ static int members_require_all_idle(const struct motor_group *group)
 	return 0;
 }
 
-static void apply_fault_policy(struct motor_group *group, uint32_t fault_mask)
+static void apply_fault_policy(struct motor_group *group)
 {
-	ARG_UNUSED(fault_mask);
-
 	switch (group->fault_policy) {
 	case MOTOR_GROUP_FAULT_ESTOP_ALL:
 		for (uint8_t i = 0; i < group->count; i++) {
@@ -140,7 +138,7 @@ static void enable_async_work_handler(struct k_work *work)
 		group->state = MOTOR_GROUP_FAULT;
 		k_spin_unlock(&group->lock, key);
 
-		apply_fault_policy(group, member_fault_mask(group));
+		apply_fault_policy(group);
 
 		slot->in_use = false;
 		slot->group = NULL;
@@ -158,7 +156,7 @@ static void enable_async_work_handler(struct k_work *work)
 		group->state = MOTOR_GROUP_FAULT;
 		k_spin_unlock(&group->lock, key);
 
-		apply_fault_policy(group, fm);
+		apply_fault_policy(group);
 
 		slot->in_use = false;
 		slot->group = NULL;
@@ -397,7 +395,7 @@ int motor_group_enable(struct motor_group *group, k_timeout_t timeout)
 			key = k_spin_lock(&group->lock);
 			group->state = MOTOR_GROUP_FAULT;
 			k_spin_unlock(&group->lock, key);
-			apply_fault_policy(group, fm);
+			apply_fault_policy(group);
 			return -EFAULT;
 		}
 
@@ -415,7 +413,7 @@ int motor_group_enable(struct motor_group *group, k_timeout_t timeout)
 	group->state = MOTOR_GROUP_FAULT;
 	k_spin_unlock(&group->lock, key);
 
-	apply_fault_policy(group, member_fault_mask(group));
+	apply_fault_policy(group);
 
 	return -ETIMEDOUT;
 }
