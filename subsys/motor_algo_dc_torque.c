@@ -20,9 +20,9 @@ static void dc_torque_sync_from_ctrl(struct motor_algo_dc_torque_data *st,
 	st->pole_pairs = params->pole_pairs;
 }
 
-static int dc_torque_init(void *algo_data, const struct motor_ctrl_params *params)
+static int dc_torque_init(void *algo, const struct motor_ctrl_params *params)
 {
-	struct motor_algo_dc_torque_data *st = algo_data;
+	struct motor_algo_dc_torque_data *st = algo;
 
 	if (params == NULL) {
 		return -EINVAL;
@@ -41,12 +41,12 @@ static int dc_torque_init(void *algo_data, const struct motor_ctrl_params *param
 	return 0;
 }
 
-static void dc_torque_inner_step(void *algo_data, const struct motor_sensor_output *sense,
-				 const struct motor_ctrl_setpoints *sp, struct motor_actuator_cmd *cmd)
+static void dc_torque_inner_step(void *algo, const struct motor_block_in *in,
+				 struct motor_block_out *out)
 {
-	struct motor_algo_dc_torque_data *st = algo_data;
-	float ia_meas = sense->hot.i_phase[0];
-	float err = sp->i_torque_a - ia_meas;
+	struct motor_algo_dc_torque_data *st = algo;
+	float ia_meas = in->sense->hot.i_phase[0];
+	float err = in->sp->i_torque_a - ia_meas;
 	float Ts = st->timing.control_loop_dt_s;
 	float kp = st->current_loop.kp;
 	float ki = st->current_loop.ki;
@@ -63,23 +63,23 @@ static void dc_torque_inner_step(void *algo_data, const struct motor_sensor_outp
 		u = st->current_loop.out_min;
 	}
 
-	cmd->kind = MOTOR_ACTUATOR_CMD_ALPHA_BETA;
-	cmd->u.ab.valpha = u;
-	cmd->u.ab.vbeta = 0.0f;
+	out->cmd->kind = MOTOR_ACTUATOR_CMD_ALPHA_BETA;
+	out->cmd->u.ab.valpha = u;
+	out->cmd->u.ab.vbeta = 0.0f;
 }
 
-static void dc_torque_set_params(void *algo_data, const struct motor_ctrl_params *params)
+static void dc_torque_set_params(void *algo, const struct motor_ctrl_params *params)
 {
-	struct motor_algo_dc_torque_data *st = algo_data;
+	struct motor_algo_dc_torque_data *st = algo;
 
 	if (params != NULL) {
 		dc_torque_sync_from_ctrl(st, params);
 	}
 }
 
-static void dc_torque_reset(void *algo_data)
+static void dc_torque_reset(void *algo)
 {
-	struct motor_algo_dc_torque_data *st = algo_data;
+	struct motor_algo_dc_torque_data *st = algo;
 
 	st->i_integral = 0.0f;
 }

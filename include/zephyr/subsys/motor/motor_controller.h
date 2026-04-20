@@ -193,6 +193,35 @@ struct motor_ctrl_params {
 };
 
 /* ------------------------------------------------------------------ */
+/* Pipeline IO bus (input/output of an algorithm step or block)        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Input bus for one algorithm/block step.
+ *
+ * Represents what the step consumes: latest sensor snapshot, current setpoints
+ * (read-only at this point) and the top-level algorithm state pointer for any
+ * cross-block context the step might need.
+ */
+struct motor_block_in {
+	const struct motor_sensor_output *sense;
+	const struct motor_ctrl_setpoints *sp;
+	void *algo;
+};
+
+/**
+ * @brief Output bus for one algorithm/block step.
+ *
+ * Represents what the step may produce: an updated setpoints object (for
+ * outer / intermediate steps) and an actuator command (only the terminal,
+ * inner step writes here; @p cmd is NULL for non-terminal steps).
+ */
+struct motor_block_out {
+	struct motor_ctrl_setpoints *sp;
+	struct motor_actuator_cmd *cmd;
+};
+
+/* ------------------------------------------------------------------ */
 /* Algorithm backend vtable                                            */
 /* ------------------------------------------------------------------ */
 
@@ -224,62 +253,63 @@ struct motor_algo_ops {
 	 * @brief Initialise algorithm state.
 	 * Called once when entering RUN state.
 	 *
-	 * @param algo_data  Per-algorithm private state pointer. The motor controller
-	 *                   never sizes or accesses it — storage is caller-owned and
-	 *                   fully opaque, which lets the future pipeline replace this
-	 *                   pointer by a @c motor_pipeline instance with no churn here.
-	 * @param params     Initial parameter set.
+	 * @param algo    Per-algorithm private state pointer. The motor controller
+	 *                never sizes or accesses it — storage is caller-owned and
+	 *                fully opaque, which lets the future pipeline replace this
+	 *                pointer by a @c motor_pipeline instance with no churn here.
+	 * @param params  Initial parameter set.
 	 * @retval 0 on success, negative errno on failure.
 	 */
-	int (*init)(void *algo_data, const struct motor_ctrl_params *params);
+	int (*init)(void *algo, const struct motor_ctrl_params *params);
 
 	/**
 	 * @brief Inner / fast path step (ISR context, e.g. PWM period ~20–100 kHz).
 	 *
-	 * Computes @ref motor_actuator_cmd from setpoints and sensor. Required.
-	 * Must set @p cmd->kind and the matching union arm.
+	 * Required. Reads sensor + setpoints from @p in and writes the actuator
+	 * command via @p out->cmd (must set @c cmd->kind and the matching union arm).
 	 *
-	 * @param algo_data  Per-algorithm private state.
-	 * @param sense      Latest sensor output.
-	 * @param sp         Current setpoints.
-	 * @param cmd        Output: command to the power stage (written by algo).
+	 * @param algo  Per-algorithm private state.
+	 * @param in    Input bus (sensor + setpoints + algo top pointer).
+	 * @param out   Output bus (cmd, optional sp updates).
 	 */
-	void (*inner_step)(void *algo_data, const struct motor_sensor_output *sense,
-			   const struct motor_ctrl_setpoints *sp, struct motor_actuator_cmd *cmd);
+	void (*inner_step)(void *algo, const struct motor_block_in *in,
+			   struct motor_block_out *out);
 
 	/**
 	 * @brief First outer step (thread context, higher priority outer work).
 	 *
 	 * Optional (NULL if single-rate). Typical use: speed or intermediate
-	 * cascade; may update @p sp (e.g. inner setpoints).
+	 * cascade; may update @p out->sp (e.g. inner setpoints). @c out->cmd is
+	 * NULL for outer steps.
 	 */
-	void (*outer_step_0)(void *algo_data, const struct motor_sensor_output *sense,
-			     struct motor_ctrl_setpoints *sp);
+	void (*outer_step_0)(void *algo, const struct motor_block_in *in,
+			     struct motor_block_out *out);
 
 	/**
 	 * @brief Second outer step (thread context, lower cadence than outer_step_0).
 	 *
-	 * Optional (NULL). Typical use: position / trajectory; may update @p sp.
+	 * Optional (NULL). Typical use: position / trajectory; may update @p out->sp.
+	 * @c out->cmd is NULL for outer steps.
 	 */
-	void (*outer_step_1)(void *algo_data, const struct motor_sensor_output *sense,
-			     struct motor_ctrl_setpoints *sp);
+	void (*outer_step_1)(void *algo, const struct motor_block_in *in,
+			     struct motor_block_out *out);
 
 	/**
 	 * @brief Update algorithm parameters at runtime.
 	 *
 	 * Called from thread context when new params are applied.
 	 *
-	 * @param algo_data  Per-algorithm private state.
-	 * @param params     New parameter set.
+	 * @param algo    Per-algorithm private state.
+	 * @param params  New parameter set.
 	 */
-	void (*set_params)(void *algo_data, const struct motor_ctrl_params *params);
+	void (*set_params)(void *algo, const struct motor_ctrl_params *params);
 
 	/**
 	 * @brief Reset algorithm integrators (called on STOP → IDLE).
 	 *
-	 * @param algo_data  Per-algorithm private state.
+	 * @param algo  Per-algorithm private state.
 	 */
-	void (*reset)(void *algo_data);
+	void (*reset)(void *algo);
 };
 
 /* ------------------------------------------------------------------ */

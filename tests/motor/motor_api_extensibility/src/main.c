@@ -36,37 +36,35 @@ static const struct motor_ctrl_params stub_motor_params = {
 	.pole_pairs = 1U,
 };
 
-static int stub_algo_init(void *algo_data, const struct motor_ctrl_params *params)
+static int stub_algo_init(void *algo, const struct motor_ctrl_params *params)
 {
-	ARG_UNUSED(algo_data);
+	ARG_UNUSED(algo);
 	ARG_UNUSED(params);
 
 	g_stub_init_calls++;
 	return 0;
 }
 
-static void stub_algo_inner_step(void *algo_data, const struct motor_sensor_output *sense,
-				 const struct motor_ctrl_setpoints *sp,
-				 struct motor_actuator_cmd *cmd)
+static void stub_algo_inner_step(void *algo, const struct motor_block_in *in,
+				 struct motor_block_out *out)
 {
-	ARG_UNUSED(algo_data);
-	ARG_UNUSED(sense);
-	ARG_UNUSED(sp);
+	ARG_UNUSED(algo);
+	ARG_UNUSED(in);
 
-	cmd->kind = MOTOR_ACTUATOR_CMD_ALPHA_BETA;
-	cmd->u.ab.valpha = 1.0f;
-	cmd->u.ab.vbeta = 2.0f;
+	out->cmd->kind = MOTOR_ACTUATOR_CMD_ALPHA_BETA;
+	out->cmd->u.ab.valpha = 1.0f;
+	out->cmd->u.ab.vbeta = 2.0f;
 }
 
-static void stub_algo_set_params(void *algo_data, const struct motor_ctrl_params *params)
+static void stub_algo_set_params(void *algo, const struct motor_ctrl_params *params)
 {
-	ARG_UNUSED(algo_data);
+	ARG_UNUSED(algo);
 	ARG_UNUSED(params);
 }
 
-static void stub_algo_reset(void *algo_data)
+static void stub_algo_reset(void *algo)
 {
-	ARG_UNUSED(algo_data);
+	ARG_UNUSED(algo);
 }
 
 static const struct motor_algo_ops stub_motor_algo = {

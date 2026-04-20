@@ -19,6 +19,24 @@ static const struct motor_ctrl_params test_ctrl_params = {
 
 ZTEST_SUITE(motor_algo_dc_torque_suite, NULL, NULL, NULL, NULL, NULL);
 
+static void run_inner(struct motor_algo_dc_torque_data *st,
+		      const struct motor_sensor_output *sense,
+		      const struct motor_ctrl_setpoints *sp,
+		      struct motor_actuator_cmd *cmd)
+{
+	struct motor_block_in in = {
+		.sense = sense,
+		.sp = sp,
+		.algo = st,
+	};
+	struct motor_block_out out = {
+		.sp = (struct motor_ctrl_setpoints *)sp,
+		.cmd = cmd,
+	};
+
+	motor_algo_dc_torque.inner_step(st, &in, &out);
+}
+
 /* Default gains: kp=0.5, ki=2000, dt=1/20000, out [-1,1] — explicit (no DT in unit test). */
 ZTEST(motor_algo_dc_torque_suite, test_pi_step_zero_current)
 {
@@ -40,7 +58,7 @@ ZTEST(motor_algo_dc_torque_suite, test_pi_step_zero_current)
 
 	zassert_equal(motor_algo_dc_torque.init(&st, &test_ctrl_params), 0);
 
-	motor_algo_dc_torque.inner_step(&st, &sense, &sp, &cmd);
+	run_inner(&st, &sense, &sp, &cmd);
 
 	zassert_equal(cmd.kind, MOTOR_ACTUATOR_CMD_ALPHA_BETA, NULL);
 	/* First step: int += 2000 * 1 * (1/20000) = 0.1; u = 0.5*1 + 0.1 = 0.6 */
@@ -67,7 +85,7 @@ ZTEST(motor_algo_dc_torque_suite, test_output_saturates_high)
 
 	zassert_equal(motor_algo_dc_torque.init(&st, &test_ctrl_params), 0);
 
-	motor_algo_dc_torque.inner_step(&st, &sense, &sp, &cmd);
+	run_inner(&st, &sense, &sp, &cmd);
 
 	zassert_equal(cmd.kind, MOTOR_ACTUATOR_CMD_ALPHA_BETA, NULL);
 	zassert_within(cmd.u.ab.valpha, 1.0f, 1e-4f, NULL);
@@ -91,11 +109,11 @@ ZTEST(motor_algo_dc_torque_suite, test_reset_clears_integral)
 	sp.i_torque_a = 1.0f;
 
 	zassert_equal(motor_algo_dc_torque.init(&st, &test_ctrl_params), 0);
-	motor_algo_dc_torque.inner_step(&st, &sense, &sp, &cmd);
+	run_inner(&st, &sense, &sp, &cmd);
 	zassert_true(cmd.u.ab.valpha > 0.5f, NULL);
 
 	motor_algo_dc_torque.reset(&st);
-	motor_algo_dc_torque.inner_step(&st, &sense, &sp, &cmd);
+	run_inner(&st, &sense, &sp, &cmd);
 
 	zassert_equal(cmd.kind, MOTOR_ACTUATOR_CMD_ALPHA_BETA, NULL);
 	/* Same as first step after reset */

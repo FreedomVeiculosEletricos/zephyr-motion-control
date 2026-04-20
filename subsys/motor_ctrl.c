@@ -45,13 +45,22 @@ static void motor_outer_thread_fn(void *p1, void *p2, void *p3)
 		{
 			uint8_t idx = (uint8_t)atomic_get(&ctrl->sense_buf_idx);
 			struct motor_sensor_output sense = ctrl->sense_buf[idx];
+			struct motor_block_in in = {
+				.sense = &sense,
+				.sp = &ctrl->setpoints,
+				.algo = ctrl->algo_data,
+			};
+			struct motor_block_out out = {
+				.sp = &ctrl->setpoints,
+				.cmd = NULL,
+			};
 
 			if (ctrl->algo->outer_step_0 != NULL) {
-				ctrl->algo->outer_step_0(ctrl->algo_data, &sense, &ctrl->setpoints);
+				ctrl->algo->outer_step_0(ctrl->algo_data, &in, &out);
 			}
 
 			if ((ctrl->algo->outer_step_1 != NULL) && ((tick % 10U) == 0U)) {
-				ctrl->algo->outer_step_1(ctrl->algo_data, &sense, &ctrl->setpoints);
+				ctrl->algo->outer_step_1(ctrl->algo_data, &in, &out);
 			}
 		}
 		k_mutex_unlock(&ctrl->lock);
@@ -113,6 +122,8 @@ static void motor_ctrl_current_isr(const struct device *actuator, void *user_dat
 	struct motor_ctrl *ctrl = user_data;
 	struct motor_sensor_output sense;
 	struct motor_actuator_cmd cmd;
+	struct motor_block_in in;
+	struct motor_block_out out;
 
 	if (ctrl->state != MOTOR_STATE_RUN) {
 		return;
@@ -126,7 +137,13 @@ static void motor_ctrl_current_isr(const struct device *actuator, void *user_dat
 	ctrl->sense_buf[new_idx] = sense;
 	atomic_set(&ctrl->sense_buf_idx, (atomic_val_t)new_idx);
 
-	ctrl->algo->inner_step(ctrl->algo_data, &sense, &ctrl->setpoints, &cmd);
+	in.sense = &sense;
+	in.sp = &ctrl->setpoints;
+	in.algo = ctrl->algo_data;
+	out.sp = &ctrl->setpoints;
+	out.cmd = &cmd;
+
+	ctrl->algo->inner_step(ctrl->algo_data, &in, &out);
 	(void)motor_actuator_set_command(actuator, &cmd);
 	atomic_inc(&ctrl->watchdog_cnt);
 }
