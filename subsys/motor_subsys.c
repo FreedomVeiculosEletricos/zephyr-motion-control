@@ -702,12 +702,11 @@ int motor_group_set_drive_mode(struct motor_group *group, enum motor_drive_mode 
 	return ret;
 }
 
-void motor_group_get_status(const struct motor_group *group, enum motor_group_state *state,
+void motor_group_get_status(struct motor_group *group, enum motor_group_state *state,
 			    uint32_t *fault_mask)
 {
 	uint32_t fm;
 	enum motor_group_state st;
-	struct motor_group *g = (struct motor_group *)group;
 
 	if (group == NULL) {
 		return;
@@ -715,10 +714,10 @@ void motor_group_get_status(const struct motor_group *group, enum motor_group_st
 
 	fm = member_fault_mask(group);
 
-	k_spinlock_key_t key = k_spin_lock(&g->lock);
+	k_spinlock_key_t key = k_spin_lock(&group->lock);
 
-	st = g->state;
-	k_spin_unlock(&g->lock, key);
+	st = group->state;
+	k_spin_unlock(&group->lock, key);
 
 	if (fm != 0U) {
 		st = MOTOR_GROUP_FAULT;

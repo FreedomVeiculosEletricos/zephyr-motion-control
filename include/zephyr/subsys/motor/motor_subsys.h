@@ -449,7 +449,7 @@ int motor_group_set_drive_mode(struct motor_group *group, enum motor_drive_mode 
  * @param state       Output: group state.
  * @param fault_mask  Output: bitmask of which member indices are faulted.
  */
-void motor_group_get_status(const struct motor_group *group, enum motor_group_state *state,
+void motor_group_get_status(struct motor_group *group, enum motor_group_state *state,
 			    uint32_t *fault_mask);
 
 /**
