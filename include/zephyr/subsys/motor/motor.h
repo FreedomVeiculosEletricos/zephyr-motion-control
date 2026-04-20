@@ -49,46 +49,6 @@ extern "C" {
  */
 
 /* ------------------------------------------------------------------ */
-/* Motor handle                                                        */
-/* ------------------------------------------------------------------ */
-
-/**
- * @brief Opaque motor handle returned by motor_init().
- *
- * The application holds this pointer and passes it to all motor_*()
- * calls.  Internal structure is not part of the public API.
- */
-typedef struct motor_ctrl *motor_t;
-
-/* ------------------------------------------------------------------ */
-/* Application callbacks                                               */
-/* ------------------------------------------------------------------ */
-
-/**
- * @brief State change notification callback.
- *
- * Called from the supervision thread (Rate 3, ~10–100 Hz) when
- * the controller state machine transitions.
- *
- * @param motor   Motor handle.
- * @param state   New state.
- * @param user_data  Registered user pointer.
- */
-typedef void (*motor_state_cb_t)(motor_t motor, enum motor_state state, void *user_data);
-
-/**
- * @brief Fault notification callback.
- *
- * Called from the supervision thread when a new fault is detected.
- * The motor is already in FAULT state when this fires.
- *
- * @param motor      Motor handle.
- * @param faults     MOTOR_FAULT_* bitmask.
- * @param user_data  Registered user pointer.
- */
-typedef void (*motor_fault_notify_cb_t)(motor_t motor, uint32_t faults, void *user_data);
-
-/* ------------------------------------------------------------------ */
 /* Interface A — application API                                       */
 /* ------------------------------------------------------------------ */
 

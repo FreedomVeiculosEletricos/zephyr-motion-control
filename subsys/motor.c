@@ -38,8 +38,8 @@ void motor_register_callbacks(motor_t motor, motor_state_cb_t state_cb,
 		return;
 	}
 
-	motor->app_state_cb = (motor_ctrl_app_state_cb)state_cb;
-	motor->app_fault_cb = (motor_ctrl_app_fault_cb)fault_cb;
+	motor->app_state_cb = state_cb;
+	motor->app_fault_cb = fault_cb;
 	motor->app_cb_data = user_data;
 }
 

@@ -17,19 +17,25 @@
 extern "C" {
 #endif
 
-struct motor_ctrl;
-
-/** Application callbacks (Interface A); optional, may be NULL. */
-typedef void (*motor_ctrl_app_state_cb)(struct motor_ctrl *ctrl, enum motor_state state,
-					void *user_data);
-typedef void (*motor_ctrl_app_fault_cb)(struct motor_ctrl *ctrl, uint32_t faults,
-					void *user_data);
+/* struct motor_ctrl is forward-declared in motor_types.h together with the
+ * public motor_t and callback typedefs reused below.
+ */
 
 /**
- * @brief Motor Controller Layer
- * @defgroup motor_controller Motor Controller API
+ * @brief Motor Controller Layer (extension API)
+ * @defgroup motor_controller Motor Controller Extension API
  * @ingroup motor_control
  * @{
+ *
+ * This header is the extension surface used by:
+ *   - the motor subsystem implementation,
+ *   - in-tree algorithm backends (motor_algo_ops vtables), and
+ *   - out-of-tree pipeline/algorithm authors that compose the controller.
+ *
+ * Applications must use the @ref motor_app "motor_*()" facade in motor.h
+ * instead. The motor_ctrl_*() entry points published here are not part of
+ * the application API; their shape may evolve as the pipeline/N-block
+ * architecture lands.
  *
  * The controller layer sits between the sensor/power stage backends
  * (interfaces B and C) and the application (interface A).
@@ -308,8 +314,8 @@ struct motor_ctrl {
 	/** Inner (ISR) rate in Hz; derived from @ref motor_ctrl_timing.control_loop_dt_s. */
 	uint32_t inner_rate_hz;
 
-	motor_ctrl_app_state_cb app_state_cb;
-	motor_ctrl_app_fault_cb app_fault_cb;
+	motor_state_cb_t app_state_cb;
+	motor_fault_notify_cb_t app_fault_cb;
 	void *app_cb_data;
 };
 

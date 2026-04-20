@@ -120,6 +120,32 @@ enum motor_accel_profile {
 	MOTOR_ACCEL_SCURVE = 2,      /* jerk-limited S-curve                   */
 };
 
+struct motor_ctrl;
+
+/**
+ * @brief Opaque motor handle returned by motor_init().
+ *
+ * The application holds this pointer and passes it to all motor_*()
+ * calls. Internal structure is not part of the public API.
+ */
+typedef struct motor_ctrl *motor_t;
+
+/**
+ * @brief State change notification callback.
+ *
+ * Invoked from the supervision thread when the controller state machine
+ * transitions.
+ */
+typedef void (*motor_state_cb_t)(motor_t motor, enum motor_state state, void *user_data);
+
+/**
+ * @brief Fault notification callback.
+ *
+ * Invoked from the supervision thread when a new fault is detected; the
+ * motor is already in MOTOR_STATE_FAULT.
+ */
+typedef void (*motor_fault_notify_cb_t)(motor_t motor, uint32_t faults, void *user_data);
+
 /**
  * @}
  */
