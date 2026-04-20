@@ -5,7 +5,6 @@
  */
 
 #include <errno.h>
-#include <math.h>
 
 #include <zephyr/drivers/motor/motor_actuator.h>
 #include <zephyr/subsys/motor/motor_controller.h>

@@ -8,9 +8,6 @@
  * for the H-bridge backend; Vbeta is unused.
  */
 
-#include <math.h>
-#include <string.h>
-
 #include <zephyr/subsys/motor/motor_algo_dc_torque.h>
 #include <zephyr/sys/util.h>
 

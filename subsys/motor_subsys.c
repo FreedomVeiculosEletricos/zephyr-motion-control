@@ -7,7 +7,7 @@
  */
 
 #include <errno.h>
-#include <limits.h>
+#include <stdint.h>
 #include <string.h>
 
 #include <zephyr/init.h>
