@@ -23,8 +23,6 @@ static motor_t instances[CONFIG_MOTOR_MAX_INSTANCES];
 static uint8_t instance_count;
 static bool motor_subsys_ready;
 
-/* --- motor_group_enable_async: one delayable work slot per possible group --- */
-
 struct motor_group_enable_async_ctx {
 	struct motor_group *group;
 	struct k_work_delayable work;
@@ -295,8 +293,6 @@ static int motor_subsys_auto_init(void)
 
 SYS_INIT(motor_subsys_auto_init, APPLICATION, CONFIG_MOTOR_SUBSYS_INIT_PRIORITY);
 #endif
-
-/* --- Motor group API --- */
 
 int motor_group_add(struct motor_group *group, motor_t *motors, uint8_t count,
 		    enum motor_group_fault_policy policy)

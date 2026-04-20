@@ -14,8 +14,6 @@
 #include <zephyr/subsys/motor/motor_subsys.h>
 #include <zephyr/ztest.h>
 
-/* --- Fake sensor/actuator (same pattern as tests/motor/pipeline) --- */
-
 static struct motor_sensor_output fake_out_a;
 static struct motor_sensor_output fake_out_b;
 
@@ -275,8 +273,6 @@ DEVICE_DEFINE(fake_motor_sensor_b, "fake_motor_sensor_b", NULL, NULL, &fs_data_b
 
 DEVICE_DEFINE(fake_motor_actuator_b, "fake_motor_actuator_b", fa_dev_init, NULL, &fa_data_b, NULL,
 	      POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE, &fake_actuator_ops_b);
-
-/* --- Controllers / params --- */
 
 static struct motor_ctrl ctrl_a;
 static struct motor_ctrl ctrl_b;

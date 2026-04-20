@@ -241,8 +241,6 @@ DEVICE_DEFINE(fake_motor_actuator, "fake_motor_actuator", fake_actuator_device_i
 	      &fake_actuator_drv_data, NULL, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 	      &fake_actuator_ops);
 
-/* --- Stub algorithm (not motor_algo_dc_torque) --- */
-
 static int g_stub_init_calls;
 
 struct stub_algo_state {

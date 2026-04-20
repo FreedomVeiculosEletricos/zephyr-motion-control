@@ -49,10 +49,6 @@
 
 #define AMPS_PER_VOLT_DEFAULT 1.0f
 
-/* -------------------------------------------------------------------------- */
-/* SAR ADC digital + DMA (internal; not a separate HAL module)                */
-/* -------------------------------------------------------------------------- */
-
 #define UNIT_ATTEN_UNINIT UINT32_MAX
 
 typedef void (*motor_enc_adc_eof_fn)(void *user, const uint8_t *dma_buf, uint32_t n_bytes);
@@ -343,10 +339,6 @@ static void motor_enc_adc_digi_stop(struct motor_enc_adc_digi_ctx *ctx)
 	ctx->eof_user = NULL;
 	ctx->running = false;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Motor sensor (encoder + latched current)                                   */
-/* -------------------------------------------------------------------------- */
 
 struct motor_sensor_enc_esp32s3_config {
 	mcpwm_dev_t *mcpwm_sync;
