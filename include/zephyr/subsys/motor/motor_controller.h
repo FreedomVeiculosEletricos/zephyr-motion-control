@@ -228,7 +228,7 @@ struct motor_block_out {
 /**
  * @brief Controller algorithm operations.
  *
- * Each algorithm (e.g. FOC, six-step, DC torque, V/f) implements
+ * Each algorithm (e.g. FOC, six-step, DC current, V/f) implements
  * this vtable. Names are **scheduling-centric**, not physics-centric:
  * single-rate algorithms may set only @ref inner_step; multi-rate algorithms
  * may also use @ref outer_step_0 and @ref outer_step_1.

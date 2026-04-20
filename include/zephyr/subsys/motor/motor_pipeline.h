@@ -31,7 +31,7 @@ extern "C" {
  *      subsys/motor_pipeline.c.
  *   2. Make @ref motor_ctrl accept a @c motor_pipeline as @c algo_data and
  *      route motor_ctrl_run_inner/outer to motor_pipeline_run_stage.
- *   3. Migrate @c motor_algo_dc_torque to a single-block pipeline.
+ *   3. Migrate @c motor_algo_dc_current to a single-block pipeline.
  *   4. Remove @c motor_algo_ops.
  */
 
@@ -66,7 +66,7 @@ struct motor_pipeline {
  * Future macro shape (placeholder, expects the runtime to be implemented):
  *
  * @code
- * MOTOR_PIPELINE_DEFINE(my_dc_torque, &my_pi.base);
+ * MOTOR_PIPELINE_DEFINE(my_dc_current, &my_pi.base);
  * @endcode
  *
  * For now the macro is a thin wrapper around an aggregate initializer; the

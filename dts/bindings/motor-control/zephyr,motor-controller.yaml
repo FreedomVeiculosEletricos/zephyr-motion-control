@@ -53,7 +53,7 @@ properties:
       - "foc"        # Field-Oriented Control (PMSM / BLDC sinusoidal)
       - "6step"      # Trapezoidal 6-step commutation (BLDC)
       - "openloop"   # Open-loop voltage/duty (commissioning, brushed)
-      - "dc-torque"  # DC brushed: scalar current PI (torque via Kt)
+      - "dc-current"  # DC brushed: scalar current PI (torque via Kt)
       - "vf-scalar"  # V/f scalar control (AC induction)
       - "stepdir"    # Step/direction (stepper open or closed loop)
     description: |
@@ -68,19 +68,19 @@ properties:
     default: 0
     description: |
       DC motor torque constant in millinewton-metre per ampere (mN·m/A).
-      Required for algorithm "dc-torque" (non-zero). Example: 50 means 0.05 N·m/A.
+      Required for algorithm "dc-current" (non-zero). Example: 50 means 0.05 N·m/A.
 
   dc-current-kp-milli:
     type: int
     default: 500
     description: |
-      DC torque algorithm — current-loop Kp multiplied by 1000 (500 = 0.5).
+      DC current algorithm — current-loop Kp multiplied by 1000 (500 = 0.5).
 
   dc-current-ki-milli:
     type: int
     default: 2000000
     description: |
-      DC torque algorithm — current-loop Ki multiplied by 1000 (2000000 = 2000).
+      DC current algorithm — current-loop Ki multiplied by 1000 (2000000 = 2000).
 
   dc-current-out-min-milli:
     type: int

@@ -6,7 +6,7 @@
 
 #include <zephyr/device.h>
 #include <zephyr/subsys/motor/motor.h>
-#include <zephyr/subsys/motor/motor_algo_dc_torque.h>
+#include <zephyr/subsys/motor/motor_algo_dc_current.h>
 #include <zephyr/subsys/motor/motor_subsys.h>
 #include <zephyr/ztest.h>
 
@@ -17,7 +17,7 @@ MOTOR_TEST_FAKE_DEFINE(motor_b);
 
 static struct motor_ctrl ctrl_a;
 static struct motor_ctrl ctrl_b;
-static struct motor_algo_dc_torque_data algo_a = {
+static struct motor_algo_dc_current_data algo_a = {
 	.current_loop = {
 		.kp = 0.5f,
 		.ki = 2000.0f,
@@ -25,7 +25,7 @@ static struct motor_algo_dc_torque_data algo_a = {
 		.out_max = 1.0f,
 	},
 };
-static struct motor_algo_dc_torque_data algo_b = {
+static struct motor_algo_dc_current_data algo_b = {
 	.current_loop = {
 		.kp = 0.5f,
 		.ki = 2000.0f,
@@ -47,7 +47,7 @@ static motor_t make_motor_a(void)
 	motor_a.sense.hot.valid_current = true;
 
 	return motor_init(&ctrl_a, DEVICE_GET(motor_a_sensor), DEVICE_GET(motor_a_actuator),
-			  &motor_algo_dc_torque, &algo_a, &test_params);
+			  &motor_algo_dc_current, &algo_a, &test_params);
 }
 
 static motor_t make_motor_b(void)
@@ -56,7 +56,7 @@ static motor_t make_motor_b(void)
 	motor_b.sense.hot.valid_current = true;
 
 	return motor_init(&ctrl_b, DEVICE_GET(motor_b_sensor), DEVICE_GET(motor_b_actuator),
-			  &motor_algo_dc_torque, &algo_b, &test_params);
+			  &motor_algo_dc_current, &algo_b, &test_params);
 }
 
 MOTOR_GROUP_DEFINE(g_null, "g_null");

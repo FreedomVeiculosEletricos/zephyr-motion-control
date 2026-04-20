@@ -18,7 +18,7 @@ config MOTOR_CONTROL_LIB
 		   (((MOTOR_STAGE_HBRIDGE_STM32 || MOTOR_STAGE_HBRIDGE_ESP32S3) && \
 		    (MOTOR_SENSOR_ENCODER_STM32 || MOTOR_SENSOR_ENCODER_ESP32S3)))
 	help
-	  Builds motor_ctrl, motor_* API, and the dc-torque algorithm backend.
+	  Builds motor_ctrl, motor_* API, and the dc-current algorithm backend.
 
 config MOTOR_CTRL_OUTER_LOOPS
 	bool "Run speed/position loops in a dedicated thread (Rates 1–2)"

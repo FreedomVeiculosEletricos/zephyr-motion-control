@@ -17,7 +17,7 @@
 /*
  * motor_ctrl is the scheduling shell. It must stay algorithm-agnostic so a new
  * algorithm or the upcoming N-block pipeline can plug in without touching this
- * file. Do not include any concrete algorithm header (e.g. motor_algo_dc_torque.h)
+ * file. Do not include any concrete algorithm header (e.g. motor_algo_dc_current.h)
  * or hard-code algorithm-specific behaviour here — go through the motor_algo_ops
  * vtable only.
  */

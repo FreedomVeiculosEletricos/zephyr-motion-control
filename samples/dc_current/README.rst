@@ -2,15 +2,15 @@
    Copyright (c) 2026 Zephyr Motor Control Contributors
    SPDX-License-Identifier: Apache-2.0
 
-DC brushed torque (scalar current PI)
-=======================================
+DC brushed current loop (scalar PI)
+====================================
 
 Overview
 --------
 
 This sample wires the out-of-tree motor control module for a **DC brushed** motor
 with a **power stage** (Interface C) and **shunt current sense** (Interface B), using
-the **dc-torque** algorithm (scalar PI on armature current).
+the **dc-current** algorithm (scalar PI on armature current).
 
 Integration uses the **STM32 LL synchronous chain** — timer TRGO triggers injected ADC
 conversions; the **ADC JEOC ISR** latches the sample and invokes the registered
@@ -26,7 +26,7 @@ gains and limits stay in ``struct motor_ctrl_params`` in ``main.c`` (must stay c
 with the DT node, e.g. ``dc-kt-mnm-per-a`` for the torque constant).
 
 For a **dedicated full-bridge** sample (two half-bridge legs, same algorithm), see
-:file:`../dc_torque_full_bridge/README.rst`.
+:file:`../dc_current_full_bridge/README.rst`.
 
 STM32 LL: half-bridge count (same sample, different overlay)
 --------------------------------------------------------------
@@ -40,7 +40,7 @@ application source is used; pick the overlay for your hardware:
   :file:`boards/nucleo_g474re_stm32_ll_1hb.overlay` (``pwm-channels = <1>;``).
 * **Full bridge / bidirectional** — two legs on the same timer (sign-magnitude).
   Overlay: :file:`boards/nucleo_g474re_stm32_ll.overlay` (``pwm-channels = <1 2>;``),
-  or use the :file:`../dc_torque_full_bridge` sample which defaults to this topology.
+  or use the :file:`../dc_current_full_bridge` sample which defaults to this topology.
 
 Optional: set ``stm32,complementary-pwm`` on the stage node for CHx/CHxN with
 dead-time on TIM1/TIM8 (not used on the default TIM3 NUCLEO overlays).
@@ -87,7 +87,7 @@ Build (STM32 LL — full bridge, two half-bridge legs)
 
 .. code-block:: shell
 
-   west build -b nucleo_g474re path/to/zephyr-motion-control/samples/dc_torque -- \
+   west build -b nucleo_g474re path/to/zephyr-motion-control/samples/dc_current -- \
      -DZEPHYR_EXTRA_MODULES=path/to/zephyr-motion-control \
      -DCONF_FILE=prj_stm32_ll.conf \
      -DDTC_OVERLAY_FILE=boards/nucleo_g474re_stm32_ll.overlay
@@ -97,7 +97,7 @@ Build (STM32 LL — single half-bridge, unidirectional)
 
 .. code-block:: shell
 
-   west build -b nucleo_g474re path/to/zephyr-motion-control/samples/dc_torque -- \
+   west build -b nucleo_g474re path/to/zephyr-motion-control/samples/dc_current -- \
      -DZEPHYR_EXTRA_MODULES=path/to/zephyr-motion-control \
      -DCONF_FILE=prj_stm32_ll.conf \
      -DDTC_OVERLAY_FILE=boards/nucleo_g474re_stm32_ll_1hb.overlay

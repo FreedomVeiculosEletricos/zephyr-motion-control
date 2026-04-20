@@ -2,20 +2,18 @@
  * Copyright (c) 2026 Zephyr Motor Control Contributors
  * SPDX-License-Identifier: Apache-2.0
  *
- * NUCLEO-G474RE: full-bridge DC (two half-bridge legs on TIM3). Independent PWM
- * on CH1/CH2; TIM3 TRGO triggers ADC1 injected. Disable Zephyr pwm3 so TIM3 is
- * not claimed twice.
+ * NUCLEO-G474RE: single half-bridge leg on TIM3 CH1 (unidirectional magnitude).
+ * TIM3 TRGO triggers ADC1 injected. Disable Zephyr pwm3.
  */
 
 / {
-	/* Composition node for MOTOR_SUBSYS_DEFINE_DT(motor_brushed, ...). */
 	motor_brushed: motor-controller {
 		compatible = "zephyr,motor-controller";
 		status = "okay";
 
 		sensor = <&motor_sensor_brushed>;
 		actuator = <&motor_stage_brushed>;
-		algorithm = "dc-torque";
+		algorithm = "dc-current";
 		dc-kt-mnm-per-a = <50>;
 		pole-pairs = <1>;
 		current-loop-rate-hz = <20000>;
@@ -42,12 +40,12 @@
 		status = "okay";
 
 		st,pwm-timer = <&timers3>;
-		pwm-channels = <1 2>;
+		pwm-channels = <1>;
 		pwm-frequency = <20000>;
 		deadtime-ns = <0>;
 		trgo-source = "update";
 
-		pinctrl-0 = <&tim3_ch1_pb4 &tim3_ch2_pc7>;
+		pinctrl-0 = <&tim3_ch1_pb4>;
 		pinctrl-names = "default";
 	};
 };

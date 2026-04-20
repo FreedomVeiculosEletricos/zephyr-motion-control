@@ -10,7 +10,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/motor/motor_actuator.h>
 #include <zephyr/subsys/motor/motor.h>
-#include <zephyr/subsys/motor/motor_algo_dc_torque.h>
+#include <zephyr/subsys/motor/motor_algo_dc_current.h>
 #include <zephyr/ztest.h>
 
 #include "motor_test_fake.h"
@@ -22,7 +22,7 @@ static const struct motor_ctrl_params pipeline_params = {
 	.kt_nm_per_a = 0.05f,
 	.pole_pairs = 1U,
 };
-static struct motor_algo_dc_torque_data algo_data = {
+static struct motor_algo_dc_current_data algo_data = {
 	.current_loop =
 		{
 			.kp = 0.5f,
@@ -49,7 +49,7 @@ ZTEST(motor_pipeline_suite, test_inner_step_reaches_actuator)
 	zassert_true(device_is_ready(sens), NULL);
 	zassert_true(device_is_ready(act), NULL);
 
-	m = motor_init(&ctrl, sens, act, &motor_algo_dc_torque, &algo_data, &pipeline_params);
+	m = motor_init(&ctrl, sens, act, &motor_algo_dc_current, &algo_data, &pipeline_params);
 	zassert_not_null(m, NULL);
 
 	zassert_equal(motor_enable(m), 0, NULL);

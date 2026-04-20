@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * DC torque on a full-bridge stage (two half-bridge legs): DT motor-controller,
+ * DC current on a full-bridge stage (two half-bridge legs): DT motor-controller,
  * subsystem registration, calibrate shunt, enable bridge, command torque.
  * Controller parameters and DC current-loop gains come from Devicetree via
  * MOTOR_SUBSYS_DEFINE_DT — no manual motor_ctrl_params in application code.
@@ -29,7 +29,7 @@ int main(void)
 	uint32_t faults = 0U;
 	int err;
 
-	printf("Motor control DC torque — full bridge (motor_subsys)\n");
+	printf("Motor control DC current — full bridge (motor_subsys)\n");
 
 	if (m == NULL) {
 		printf("motor_subsys_get_by_label failed\n");

@@ -61,7 +61,7 @@ extern "C" {
  *
  * MOTOR_BLOCK_DEFINE(my_pi, pi_current_entry,
  *                    .stage = MOTOR_STAGE_INNER_ISR, .period_div = 1);
- * MOTOR_PIPELINE_DEFINE(my_dc_torque, &my_pi.base);
+ * MOTOR_PIPELINE_DEFINE(my_dc_current, &my_pi.base);
  * @endcode
  *
  * @note Skeleton only. Until @c MOTOR_BLOCK_DEFINE / @c MOTOR_PIPELINE_DEFINE

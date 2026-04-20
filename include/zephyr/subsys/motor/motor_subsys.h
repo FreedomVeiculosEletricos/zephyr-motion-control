@@ -158,11 +158,11 @@ struct motor_subsys_entry {
 	}
 
 /**
- * @brief Register a motor-controller instance from Devicetree (dc-torque algorithm).
+ * @brief Register a motor-controller instance from Devicetree (dc-current algorithm).
  *
- * Expands @ref motor_ctrl_params and @ref motor_algo_dc_torque_data from the
+ * Expands @ref motor_ctrl_params and @ref motor_algo_dc_current_data from the
  * `zephyr,motor-controller` node using @ref MOTOR_CTRL_PARAMS_INITIALIZER and
- * @ref MOTOR_DC_TORQUE_DATA_INITIALIZER — no application-side parameter structs.
+ * @ref MOTOR_DC_CURRENT_DATA_INITIALIZER — no application-side parameter structs.
  *
  * @param _nodelabel  DT node label (unquoted), e.g. motor_brushed.
  * @param _ctrl       Pre-declared @ref motor_ctrl instance (MOTOR_CTRL_DEFINE).
@@ -170,12 +170,12 @@ struct motor_subsys_entry {
 #define MOTOR_SUBSYS_DEFINE_DT(_nodelabel, _ctrl)                                                  \
 	static const struct motor_ctrl_params UTIL_CAT(_motor_params_, _nodelabel) =                \
 		MOTOR_CTRL_PARAMS_INITIALIZER(DT_NODELABEL(_nodelabel));                             \
-	static struct motor_algo_dc_torque_data UTIL_CAT(_motor_dc_, _nodelabel) =                   \
-		MOTOR_DC_TORQUE_DATA_INITIALIZER(DT_NODELABEL(_nodelabel));                           \
+	static struct motor_algo_dc_current_data UTIL_CAT(_motor_dc_, _nodelabel) =                   \
+		MOTOR_DC_CURRENT_DATA_INITIALIZER(DT_NODELABEL(_nodelabel));                           \
 	MOTOR_SUBSYS_DEFINE(motor_entry_##_nodelabel, (_ctrl),                                     \
 			    DEVICE_DT_GET(DT_PHANDLE(DT_NODELABEL(_nodelabel), sensor)),           \
 			    DEVICE_DT_GET(DT_PHANDLE(DT_NODELABEL(_nodelabel), actuator)),         \
-			    &motor_algo_dc_torque, &UTIL_CAT(_motor_dc_, _nodelabel),                 \
+			    &motor_algo_dc_current, &UTIL_CAT(_motor_dc_, _nodelabel),                 \
 			    &UTIL_CAT(_motor_params_, _nodelabel), STRINGIFY(_nodelabel))
 
 /* ------------------------------------------------------------------ */

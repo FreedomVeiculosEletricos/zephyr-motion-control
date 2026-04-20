@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * Minimal DC torque loop demo: DT motor-controller node, subsystem registration,
+ * Minimal DC current loop demo: DT motor-controller node, subsystem registration,
  * calibrate shunt, enable bridge, command torque. Parameters from Devicetree.
  */
 
@@ -27,7 +27,7 @@ int main(void)
 	uint32_t faults = 0U;
 	int err;
 
-	printf("Motor control DC torque (motor_subsys)\n");
+	printf("Motor control DC current (motor_subsys)\n");
 
 	if (m == NULL) {
 		printf("motor_subsys_get_by_label failed\n");

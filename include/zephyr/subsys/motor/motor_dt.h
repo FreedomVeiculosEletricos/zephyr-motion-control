@@ -21,7 +21,7 @@
 
 #include <zephyr/devicetree.h>
 #include <zephyr/subsys/motor/motor_controller.h>
-#include <zephyr/subsys/motor/motor_algo_dc_torque.h>
+#include <zephyr/subsys/motor/motor_algo_dc_current.h>
 
 /** @internal 2π/60 — RPM to rad/s */
 #define MOTOR_DT_RPM_TO_RADS (0.10471975512f)
@@ -58,14 +58,14 @@
 	}
 
 /**
- * @brief Static initializer for @ref motor_algo_dc_torque_data from a motor-controller node.
+ * @brief Static initializer for @ref motor_algo_dc_current_data from a motor-controller node.
  *
  * Inner-loop gains come from optional DT properties (milli-scaled); limits/timing/kt are
- * refreshed in @ref motor_algo_dc_torque init from @ref motor_ctrl_params.
+ * refreshed in @ref motor_algo_dc_current init from @ref motor_ctrl_params.
  *
  * @param node_id Devicetree node identifier for the @c zephyr,motor-controller instance.
  */
-#define MOTOR_DC_TORQUE_DATA_INITIALIZER(node_id)                                                \
+#define MOTOR_DC_CURRENT_DATA_INITIALIZER(node_id)                                                \
 	{                                                                                          \
 		.i_integral = 0.0f,                                                              \
 		.current_loop = {                                                                  \

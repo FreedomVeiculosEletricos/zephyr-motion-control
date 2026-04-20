@@ -8,6 +8,6 @@ common:
     - motor
     - motor_algo
 tests:
-  motor.algo.dc_torque:
+  motor.algo.dc_current:
     integration_platforms:
       - native_sim/native/64

@@ -8,10 +8,10 @@
  * for the H-bridge backend; Vbeta is unused.
  */
 
-#include <zephyr/subsys/motor/motor_algo_dc_torque.h>
+#include <zephyr/subsys/motor/motor_algo_dc_current.h>
 #include <zephyr/sys/util.h>
 
-static void dc_torque_sync_from_ctrl(struct motor_algo_dc_torque_data *st,
+static void dc_current_sync_from_ctrl(struct motor_algo_dc_current_data *st,
 				     const struct motor_ctrl_params *params)
 {
 	st->limits = params->limits;
@@ -20,9 +20,9 @@ static void dc_torque_sync_from_ctrl(struct motor_algo_dc_torque_data *st,
 	st->pole_pairs = params->pole_pairs;
 }
 
-static int dc_torque_init(void *algo, const struct motor_ctrl_params *params)
+static int dc_current_init(void *algo, const struct motor_ctrl_params *params)
 {
-	struct motor_algo_dc_torque_data *st = algo;
+	struct motor_algo_dc_current_data *st = algo;
 
 	if (params == NULL) {
 		return -EINVAL;
@@ -36,15 +36,15 @@ static int dc_torque_init(void *algo, const struct motor_ctrl_params *params)
 		return -EINVAL;
 	}
 
-	dc_torque_sync_from_ctrl(st, params);
+	dc_current_sync_from_ctrl(st, params);
 	st->i_integral = 0.0f;
 	return 0;
 }
 
-static void dc_torque_inner_step(void *algo, const struct motor_block_in *in,
+static void dc_current_inner_step(void *algo, const struct motor_block_in *in,
 				 struct motor_block_out *out)
 {
-	struct motor_algo_dc_torque_data *st = algo;
+	struct motor_algo_dc_current_data *st = algo;
 	float ia_meas = in->sense->hot.i_phase[0];
 	float err = in->sp->i_torque_a - ia_meas;
 	float Ts = st->timing.control_loop_dt_s;
@@ -68,29 +68,29 @@ static void dc_torque_inner_step(void *algo, const struct motor_block_in *in,
 	out->cmd->u.ab.vbeta = 0.0f;
 }
 
-static void dc_torque_set_params(void *algo, const struct motor_ctrl_params *params)
+static void dc_current_set_params(void *algo, const struct motor_ctrl_params *params)
 {
-	struct motor_algo_dc_torque_data *st = algo;
+	struct motor_algo_dc_current_data *st = algo;
 
 	if (params != NULL) {
-		dc_torque_sync_from_ctrl(st, params);
+		dc_current_sync_from_ctrl(st, params);
 	}
 }
 
-static void dc_torque_reset(void *algo)
+static void dc_current_reset(void *algo)
 {
-	struct motor_algo_dc_torque_data *st = algo;
+	struct motor_algo_dc_current_data *st = algo;
 
 	st->i_integral = 0.0f;
 }
 
-const struct motor_algo_ops motor_algo_dc_torque = {
-	.init = dc_torque_init,
-	.inner_step = dc_torque_inner_step,
+const struct motor_algo_ops motor_algo_dc_current = {
+	.init = dc_current_init,
+	.inner_step = dc_current_inner_step,
 	.outer_step_0 = NULL,
 	.outer_step_1 = NULL,
-	.set_params = dc_torque_set_params,
-	.reset = dc_torque_reset,
+	.set_params = dc_current_set_params,
+	.reset = dc_current_reset,
 	.outer_0_div = 0U,
 	.outer_1_div = 0U,
 };
