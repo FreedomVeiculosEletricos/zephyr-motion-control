@@ -526,78 +526,87 @@ int motor_group_clear_fault(struct motor_group *group)
 	return 0;
 }
 
+typedef int (*motor_group_apply_fn)(motor_t m, uint8_t idx, void *ctx);
+
+static int group_require_run(struct motor_group *group)
+{
+	k_spinlock_key_t key = k_spin_lock(&group->lock);
+
+	if (group->state != MOTOR_GROUP_RUN) {
+		k_spin_unlock(&group->lock, key);
+		return -ENOEXEC;
+	}
+
+	k_spin_unlock(&group->lock, key);
+
+	if (!members_all_in_state(group, MOTOR_STATE_RUN)) {
+		return -ENOEXEC;
+	}
+
+	return 0;
+}
+
+/* Apply fn to every member, return the first non-zero result. */
+static int group_for_each(const struct motor_group *group, motor_group_apply_fn fn, void *ctx)
+{
+	int first_err = 0;
+
+	for (uint8_t i = 0; i < group->count; i++) {
+		int r = fn(group->members[i], i, ctx);
+
+		if ((r != 0) && (first_err == 0)) {
+			first_err = r;
+		}
+	}
+
+	return first_err;
+}
+
+static int apply_set_torque(motor_t m, uint8_t idx, void *ctx)
+{
+	const float *torques = ctx;
+
+	return motor_set_torque(m, torques[idx]);
+}
+
 int motor_group_set_torque(struct motor_group *group, const float *torques)
 {
-	int ret = 0;
-	int r;
+	int ret;
 
 	if ((group == NULL) || (torques == NULL) || (group->count == 0U)) {
 		return -EINVAL;
 	}
 
-	k_spinlock_key_t key = k_spin_lock(&group->lock);
-
-	if (group->state != MOTOR_GROUP_RUN) {
-		k_spin_unlock(&group->lock, key);
-		return -ENOEXEC;
+	ret = group_require_run(group);
+	if (ret != 0) {
+		return ret;
 	}
 
-	k_spin_unlock(&group->lock, key);
+	return group_for_each(group, apply_set_torque, (void *)torques);
+}
 
-	for (uint8_t i = 0; i < group->count; i++) {
-		enum motor_state st;
+static int apply_set_drive_mode(motor_t m, uint8_t idx, void *ctx)
+{
+	enum motor_drive_mode mode = *(enum motor_drive_mode *)ctx;
 
-		motor_get_status(group->members[i], &st, NULL, NULL);
-		if (st != MOTOR_STATE_RUN) {
-			return -ENOEXEC;
-		}
-	}
-
-	for (uint8_t i = 0; i < group->count; i++) {
-		r = motor_set_torque(group->members[i], torques[i]);
-		if ((r != 0) && (ret == 0)) {
-			ret = r;
-		}
-	}
-
-	return ret;
+	ARG_UNUSED(idx);
+	return motor_set_drive_mode(m, mode);
 }
 
 int motor_group_set_drive_mode(struct motor_group *group, enum motor_drive_mode mode)
 {
-	int ret = 0;
-	int r;
+	int ret;
 
 	if (group == NULL) {
 		return -EINVAL;
 	}
 
-	k_spinlock_key_t key = k_spin_lock(&group->lock);
-
-	if (group->state != MOTOR_GROUP_RUN) {
-		k_spin_unlock(&group->lock, key);
-		return -ENOEXEC;
+	ret = group_require_run(group);
+	if (ret != 0) {
+		return ret;
 	}
 
-	k_spin_unlock(&group->lock, key);
-
-	for (uint8_t i = 0; i < group->count; i++) {
-		enum motor_state st;
-
-		motor_get_status(group->members[i], &st, NULL, NULL);
-		if (st != MOTOR_STATE_RUN) {
-			return -ENOEXEC;
-		}
-	}
-
-	for (uint8_t i = 0; i < group->count; i++) {
-		r = motor_set_drive_mode(group->members[i], mode);
-		if ((r != 0) && (ret == 0)) {
-			ret = r;
-		}
-	}
-
-	return ret;
+	return group_for_each(group, apply_set_drive_mode, &mode);
 }
 
 void motor_group_get_status(struct motor_group *group, enum motor_group_state *state,
