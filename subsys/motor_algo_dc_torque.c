@@ -91,4 +91,6 @@ const struct motor_algo_ops motor_algo_dc_torque = {
 	.outer_step_1 = NULL,
 	.set_params = dc_torque_set_params,
 	.reset = dc_torque_reset,
+	.outer_0_div = 0U,
+	.outer_1_div = 0U,
 };

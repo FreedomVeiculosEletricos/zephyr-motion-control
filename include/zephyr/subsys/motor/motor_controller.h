@@ -310,6 +310,20 @@ struct motor_algo_ops {
 	 * @param algo  Per-algorithm private state.
 	 */
 	void (*reset)(void *algo);
+
+	/**
+	 * @brief Outer-step decimation factors relative to the outer thread tick.
+	 *
+	 * @c outer_0_div = N means @ref outer_step_0 runs once every N outer ticks
+	 * (the outer thread's wake period sets the base rate). @c outer_1_div applies
+	 * the same way to @ref outer_step_1. A value of 0 means "every tick" (same
+	 * as 1) and is the implicit default for algorithms that don't set it. This
+	 * data-drives what used to be a hardcoded modulus inside motor_ctrl, which
+	 * also matches how the upcoming N-block pipeline expresses cadence
+	 * (every block has its own @c period_div).
+	 */
+	uint16_t outer_0_div;
+	uint16_t outer_1_div;
 };
 
 /* ------------------------------------------------------------------ */
