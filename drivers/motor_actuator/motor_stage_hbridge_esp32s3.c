@@ -23,6 +23,8 @@
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/sys/util.h>
 
+#include "motor_actuator_common.h"
+
 #define DUTY_MODE_ACTIVE_HIGH 0
 #define DUTY_MODE_FORCE_LOW   2
 #define DUTY_MODE_FORCE_HIGH  3
@@ -212,25 +214,11 @@ static int hbridge_esp32s3_set_duty(const struct device *dev, const float *duty,
 	return hbridge_esp32s3_set_vector(dev, v * 2.0f - 1.0f, 0.0f);
 }
 
-static int hbridge_esp32s3_set_command(const struct device *dev, const struct motor_actuator_cmd *cmd)
+static int hbridge_esp32s3_set_command(const struct device *dev,
+				       const struct motor_actuator_cmd *cmd)
 {
-	if (cmd == NULL) {
-		return -EINVAL;
-	}
-
-	switch (cmd->kind) {
-	case MOTOR_ACTUATOR_CMD_ALPHA_BETA:
-		return hbridge_esp32s3_set_vector(dev, cmd->u.ab.valpha, cmd->u.ab.vbeta);
-	case MOTOR_ACTUATOR_CMD_VD_VQ:
-		return -ENOTSUP;
-	case MOTOR_ACTUATOR_CMD_DUTY_DIRECT:
-		if (cmd->u.duty.n == 0U || cmd->u.duty.n > MOTOR_ACTUATOR_CMD_DUTY_MAX) {
-			return -EINVAL;
-		}
-		return hbridge_esp32s3_set_duty(dev, cmd->u.duty.duty, cmd->u.duty.n);
-	default:
-		return -EINVAL;
-	}
+	return motor_actuator_dispatch_cmd(dev, cmd, hbridge_esp32s3_set_vector,
+					   hbridge_esp32s3_set_duty);
 }
 
 static int hbridge_esp32s3_set_drive_mode(const struct device *dev, enum motor_drive_mode mode)

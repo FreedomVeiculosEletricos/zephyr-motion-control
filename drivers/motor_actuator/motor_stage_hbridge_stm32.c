@@ -27,6 +27,8 @@
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/sys/util.h>
 
+#include "motor_actuator_common.h"
+
 #define HB_MAX 3U
 
 struct motor_hbridge_stm32_config {
@@ -400,23 +402,8 @@ static int hbridge_stm32_set_duty(const struct device *dev, const float *duty, u
 
 static int hbridge_stm32_set_command(const struct device *dev, const struct motor_actuator_cmd *cmd)
 {
-	if (cmd == NULL) {
-		return -EINVAL;
-	}
-
-	switch (cmd->kind) {
-	case MOTOR_ACTUATOR_CMD_ALPHA_BETA:
-		return hbridge_stm32_set_vector(dev, cmd->u.ab.valpha, cmd->u.ab.vbeta);
-	case MOTOR_ACTUATOR_CMD_VD_VQ:
-		return -ENOTSUP;
-	case MOTOR_ACTUATOR_CMD_DUTY_DIRECT:
-		if (cmd->u.duty.n == 0U || cmd->u.duty.n > MOTOR_ACTUATOR_CMD_DUTY_MAX) {
-			return -EINVAL;
-		}
-		return hbridge_stm32_set_duty(dev, cmd->u.duty.duty, cmd->u.duty.n);
-	default:
-		return -EINVAL;
-	}
+	return motor_actuator_dispatch_cmd(dev, cmd, hbridge_stm32_set_vector,
+					   hbridge_stm32_set_duty);
 }
 
 static int hbridge_stm32_set_drive_mode(const struct device *dev, enum motor_drive_mode mode)
