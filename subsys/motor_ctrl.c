@@ -28,7 +28,6 @@ static void motor_ctrl_current_isr(const struct device *actuator, void *user_dat
 static void motor_outer_thread_fn(void *p1, void *p2, void *p3)
 {
 	struct motor_ctrl *ctrl = p1;
-	uint32_t tick = 0U;
 
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
@@ -37,7 +36,8 @@ static void motor_outer_thread_fn(void *p1, void *p2, void *p3)
 		k_sleep(K_MSEC(1));
 
 		if (ctrl->state != MOTOR_STATE_RUN) {
-			tick = 0U;
+			ctrl->stage_tick[MOTOR_STAGE_OUTER_FAST] = 0U;
+			ctrl->stage_tick[MOTOR_STAGE_OUTER_SLOW] = 0U;
 			continue;
 		}
 
@@ -56,18 +56,21 @@ static void motor_outer_thread_fn(void *p1, void *p2, void *p3)
 			};
 			uint16_t div0 = ctrl->algo->outer_0_div ? ctrl->algo->outer_0_div : 1U;
 			uint16_t div1 = ctrl->algo->outer_1_div ? ctrl->algo->outer_1_div : 1U;
+			uint32_t tick0 = ctrl->stage_tick[MOTOR_STAGE_OUTER_FAST];
+			uint32_t tick1 = ctrl->stage_tick[MOTOR_STAGE_OUTER_SLOW];
 
-			if ((ctrl->algo->outer_step_0 != NULL) && ((tick % div0) == 0U)) {
+			if ((ctrl->algo->outer_step_0 != NULL) && ((tick0 % div0) == 0U)) {
 				ctrl->algo->outer_step_0(ctrl->algo_data, &in, &out);
 			}
 
-			if ((ctrl->algo->outer_step_1 != NULL) && ((tick % div1) == 0U)) {
+			if ((ctrl->algo->outer_step_1 != NULL) && ((tick1 % div1) == 0U)) {
 				ctrl->algo->outer_step_1(ctrl->algo_data, &in, &out);
 			}
 		}
 		k_mutex_unlock(&ctrl->lock);
 
-		tick++;
+		ctrl->stage_tick[MOTOR_STAGE_OUTER_FAST]++;
+		ctrl->stage_tick[MOTOR_STAGE_OUTER_SLOW]++;
 	}
 }
 #endif
@@ -147,6 +150,7 @@ static void motor_ctrl_current_isr(const struct device *actuator, void *user_dat
 
 	ctrl->algo->inner_step(ctrl->algo_data, &in, &out);
 	(void)motor_actuator_set_command(actuator, &cmd);
+	ctrl->stage_tick[MOTOR_STAGE_INNER_ISR]++;
 	atomic_inc(&ctrl->watchdog_cnt);
 }
 

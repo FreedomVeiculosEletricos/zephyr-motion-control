@@ -358,10 +358,12 @@ struct motor_ctrl {
 	/* Parameters — updated via motor_ctrl_set_params()              */
 	struct motor_ctrl_params params;
 
-	/* Multi-rate scheduling (reserved for future divider-driven outers) */
-	uint32_t inner_step_cnt; /* ISR counter for outer cadence        */
-	uint32_t outer0_div;     /* inner steps per outer_step_0 tick  */
-	uint32_t outer1_div;     /* inner steps per outer_step_1 tick    */
+	/* Per-stage tick counters (one per motor_pipeline_stage). Each stage's
+	 * thread / ISR increments stage_tick[stage]; a block declared with
+	 * period_div = N runs whenever stage_tick % N == 0. The N-block pipeline
+	 * uses this same counter directly.
+	 */
+	uint32_t stage_tick[MOTOR_STAGE_COUNT];
 
 	/* Double-buffer for ISR → thread data handoff                   */
 	struct motor_sensor_output sense_buf[2];
