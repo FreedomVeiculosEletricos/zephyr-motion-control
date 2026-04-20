@@ -54,12 +54,14 @@ static void motor_outer_thread_fn(void *p1, void *p2, void *p3)
 				.sp = &ctrl->setpoints,
 				.cmd = NULL,
 			};
+			uint16_t div0 = ctrl->algo->outer_0_div ? ctrl->algo->outer_0_div : 1U;
+			uint16_t div1 = ctrl->algo->outer_1_div ? ctrl->algo->outer_1_div : 1U;
 
-			if (ctrl->algo->outer_step_0 != NULL) {
+			if ((ctrl->algo->outer_step_0 != NULL) && ((tick % div0) == 0U)) {
 				ctrl->algo->outer_step_0(ctrl->algo_data, &in, &out);
 			}
 
-			if ((ctrl->algo->outer_step_1 != NULL) && ((tick % 10U) == 0U)) {
+			if ((ctrl->algo->outer_step_1 != NULL) && ((tick % div1) == 0U)) {
 				ctrl->algo->outer_step_1(ctrl->algo_data, &in, &out);
 			}
 		}
