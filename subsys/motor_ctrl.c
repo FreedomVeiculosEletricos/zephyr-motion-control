@@ -24,7 +24,66 @@
 
 static void motor_ctrl_current_isr(const struct device *actuator, void *user_data);
 
+/*
+ * Single dispatch point for one inner_step ISR pass: build the IO bus, run the
+ * algorithm and forward the resulting actuator command. When the N-block
+ * pipeline lands, only this helper changes (it iterates blocks at INNER_ISR).
+ */
+static void motor_ctrl_run_inner(struct motor_ctrl *ctrl, const struct motor_sensor_output *sense,
+				 struct motor_actuator_cmd *cmd)
+{
+	struct motor_block_in in = {
+		.sense = sense,
+		.sp = &ctrl->setpoints,
+		.algo = ctrl->algo_data,
+	};
+	struct motor_block_out out = {
+		.sp = &ctrl->setpoints,
+		.cmd = cmd,
+	};
+
+	ctrl->algo->inner_step(ctrl->algo_data, &in, &out);
+}
+
 #if IS_ENABLED(CONFIG_MOTOR_CTRL_OUTER_LOOPS)
+/*
+ * Single dispatch point for one outer pass at the requested stage. The vtable
+ * still has fixed slots (outer_step_0 / outer_step_1) so the caller passes the
+ * stage and we route to the matching slot, applying the algo-supplied period_div.
+ */
+static void motor_ctrl_run_outer(struct motor_ctrl *ctrl, enum motor_pipeline_stage stage,
+				 const struct motor_sensor_output *sense)
+{
+	struct motor_block_in in = {
+		.sense = sense,
+		.sp = &ctrl->setpoints,
+		.algo = ctrl->algo_data,
+	};
+	struct motor_block_out out = {
+		.sp = &ctrl->setpoints,
+		.cmd = NULL,
+	};
+	void (*step)(void *, const struct motor_block_in *, struct motor_block_out *) = NULL;
+	uint16_t div = 1U;
+
+	switch (stage) {
+	case MOTOR_STAGE_OUTER_FAST:
+		step = ctrl->algo->outer_step_0;
+		div = ctrl->algo->outer_0_div ? ctrl->algo->outer_0_div : 1U;
+		break;
+	case MOTOR_STAGE_OUTER_SLOW:
+		step = ctrl->algo->outer_step_1;
+		div = ctrl->algo->outer_1_div ? ctrl->algo->outer_1_div : 1U;
+		break;
+	default:
+		return;
+	}
+
+	if ((step != NULL) && ((ctrl->stage_tick[stage] % div) == 0U)) {
+		step(ctrl->algo_data, &in, &out);
+	}
+}
+
 static void motor_outer_thread_fn(void *p1, void *p2, void *p3)
 {
 	struct motor_ctrl *ctrl = p1;
@@ -45,27 +104,9 @@ static void motor_outer_thread_fn(void *p1, void *p2, void *p3)
 		{
 			uint8_t idx = (uint8_t)atomic_get(&ctrl->sense_buf_idx);
 			struct motor_sensor_output sense = ctrl->sense_buf[idx];
-			struct motor_block_in in = {
-				.sense = &sense,
-				.sp = &ctrl->setpoints,
-				.algo = ctrl->algo_data,
-			};
-			struct motor_block_out out = {
-				.sp = &ctrl->setpoints,
-				.cmd = NULL,
-			};
-			uint16_t div0 = ctrl->algo->outer_0_div ? ctrl->algo->outer_0_div : 1U;
-			uint16_t div1 = ctrl->algo->outer_1_div ? ctrl->algo->outer_1_div : 1U;
-			uint32_t tick0 = ctrl->stage_tick[MOTOR_STAGE_OUTER_FAST];
-			uint32_t tick1 = ctrl->stage_tick[MOTOR_STAGE_OUTER_SLOW];
 
-			if ((ctrl->algo->outer_step_0 != NULL) && ((tick0 % div0) == 0U)) {
-				ctrl->algo->outer_step_0(ctrl->algo_data, &in, &out);
-			}
-
-			if ((ctrl->algo->outer_step_1 != NULL) && ((tick1 % div1) == 0U)) {
-				ctrl->algo->outer_step_1(ctrl->algo_data, &in, &out);
-			}
+			motor_ctrl_run_outer(ctrl, MOTOR_STAGE_OUTER_FAST, &sense);
+			motor_ctrl_run_outer(ctrl, MOTOR_STAGE_OUTER_SLOW, &sense);
 		}
 		k_mutex_unlock(&ctrl->lock);
 
@@ -127,8 +168,6 @@ static void motor_ctrl_current_isr(const struct device *actuator, void *user_dat
 	struct motor_ctrl *ctrl = user_data;
 	struct motor_sensor_output sense;
 	struct motor_actuator_cmd cmd;
-	struct motor_block_in in;
-	struct motor_block_out out;
 
 	if (ctrl->state != MOTOR_STATE_RUN) {
 		return;
@@ -142,13 +181,7 @@ static void motor_ctrl_current_isr(const struct device *actuator, void *user_dat
 	ctrl->sense_buf[new_idx] = sense;
 	atomic_set(&ctrl->sense_buf_idx, (atomic_val_t)new_idx);
 
-	in.sense = &sense;
-	in.sp = &ctrl->setpoints;
-	in.algo = ctrl->algo_data;
-	out.sp = &ctrl->setpoints;
-	out.cmd = &cmd;
-
-	ctrl->algo->inner_step(ctrl->algo_data, &in, &out);
+	motor_ctrl_run_inner(ctrl, &sense, &cmd);
 	(void)motor_actuator_set_command(actuator, &cmd);
 	ctrl->stage_tick[MOTOR_STAGE_INNER_ISR]++;
 	atomic_inc(&ctrl->watchdog_cnt);
