@@ -40,18 +40,16 @@
 						    MOTOR_DT_RPM_TO_RADS,                              \
 				.vbus_derating_start = 0.0f,                                       \
 				.temp_derating_start =                                               \
-					(float)DT_PROP_OR(node_id, temp_derating_start_dc, 0) /    \
-					100.0f,                                                      \
+					(float)DT_PROP(node_id, temp_derating_start_dc) / 100.0f,    \
 				.temp_fault =                                                      \
-					(float)DT_PROP_OR(node_id, temp_fault_dc, 0) / 100.0f,     \
+					(float)DT_PROP(node_id, temp_fault_dc) / 100.0f,           \
 			},                                                                         \
 		.timing =                                                                          \
 			{                                                                          \
 				.control_loop_dt_s =                                               \
-					1.0f / (float)DT_PROP_OR(node_id, current_loop_rate_hz,    \
-								 20000),                         \
+					1.0f / (float)DT_PROP(node_id, current_loop_rate_hz),         \
 			},                                                                         \
-		.kt_nm_per_a = (float)DT_PROP_OR(node_id, dc_kt_mnm_per_a, 0) / 1000.0f,            \
+		.kt_nm_per_a = (float)DT_PROP(node_id, dc_kt_mnm_per_a) / 1000.0f,                  \
 		.pole_pairs = (uint8_t)DT_PROP(node_id, pole_pairs),                             \
 		.speed_loop = {0},                                                                 \
 		.accel = {0},                                                                      \
@@ -71,12 +69,10 @@
 	{                                                                                          \
 		.i_integral = 0.0f,                                                              \
 		.current_loop = {                                                                  \
-			.kp = (float)DT_PROP_OR(node_id, dc_current_kp_milli, 500) / 1000.0f,   \
-			.ki = (float)DT_PROP_OR(node_id, dc_current_ki_milli, 2000000) / 1000.0f, \
-			.out_min = (float)DT_PROP_OR(node_id, dc_current_out_min_milli, (-1000)) / \
-				   1000.0f,                                                        \
-			.out_max = (float)DT_PROP_OR(node_id, dc_current_out_max_milli, (1000)) /  \
-				   1000.0f,                                                        \
+			.kp = (float)DT_PROP(node_id, dc_current_kp_milli) / 1000.0f,            \
+			.ki = (float)DT_PROP(node_id, dc_current_ki_milli) / 1000.0f,            \
+			.out_min = (float)DT_PROP(node_id, dc_current_out_min_milli) / 1000.0f,  \
+			.out_max = (float)DT_PROP(node_id, dc_current_out_max_milli) / 1000.0f,  \
 		},                                                                                 \
 	}
 

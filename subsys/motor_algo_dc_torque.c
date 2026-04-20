@@ -28,6 +28,10 @@ static int dc_torque_init(void *algo_data, const struct motor_ctrl_params *param
 		return -EINVAL;
 	}
 
+	if (params->timing.control_loop_dt_s <= 0.0f) {
+		return -EINVAL;
+	}
+
 	if ((st->current_loop.kp == 0.0f) && (st->current_loop.ki == 0.0f)) {
 		return -EINVAL;
 	}
@@ -47,10 +51,6 @@ static void dc_torque_inner_step(void *algo_data, const struct motor_sensor_outp
 	float kp = st->current_loop.kp;
 	float ki = st->current_loop.ki;
 	float u;
-
-	if (Ts <= 0.0f) {
-		Ts = 1.0f / 20000.0f;
-	}
 
 	st->i_integral += ki * err * Ts;
 	u = kp * err + st->i_integral;
