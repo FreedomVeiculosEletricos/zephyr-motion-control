@@ -362,7 +362,12 @@ static void tim_hbridge_set_vector_independent(TIM_TypeDef *tim, const uint8_t *
 		return;
 	}
 
-	/* Three legs: not modulated in this driver revision */
+	/*
+	 * TODO: 3-leg modulation (SVPWM/six-step) not implemented; this branch
+	 * forces all phases low to keep the motor disengaged instead of driving
+	 * an undefined vector. Rejecting at compile time is not viable yet
+	 * because pwm-channels=3 is a valid DT shape used by 3-phase samples.
+	 */
 	for (i = 0U; i < n_ch; i++) {
 		oc_set_compare(tim, ch[i], 0U);
 	}
