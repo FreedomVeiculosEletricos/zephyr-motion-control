@@ -92,6 +92,31 @@ static void apply_fault_policy(struct motor_group *group)
 	}
 }
 
+/*
+ * Settle an async-enable slot in the given terminal state, release it, and
+ * fire the group callback. Must run from thread context (k_spin_lock).
+ */
+static void enable_async_finish(struct motor_group_enable_async_ctx *slot,
+				enum motor_group_state final_state, uint32_t fault_mask)
+{
+	struct motor_group *group = slot->group;
+	k_spinlock_key_t key = k_spin_lock(&group->lock);
+
+	group->state = final_state;
+	k_spin_unlock(&group->lock, key);
+
+	if (final_state == MOTOR_GROUP_FAULT) {
+		apply_fault_policy(group);
+	}
+
+	slot->in_use = false;
+	slot->group = NULL;
+
+	if (group->cb != NULL) {
+		group->cb(group, final_state, fault_mask, group->cb_user_data);
+	}
+}
+
 static void enable_async_work_handler(struct k_work *work)
 {
 	struct k_work_delayable *dwork = CONTAINER_OF(work, struct k_work_delayable, work);
@@ -105,52 +130,18 @@ static void enable_async_work_handler(struct k_work *work)
 	}
 
 	if (k_uptime_ticks() >= slot->deadline) {
-		k_spinlock_key_t key = k_spin_lock(&group->lock);
-
-		group->state = MOTOR_GROUP_FAULT;
-		k_spin_unlock(&group->lock, key);
-
-		apply_fault_policy(group);
-
-		slot->in_use = false;
-		slot->group = NULL;
-
-		if (group->cb != NULL) {
-			group->cb(group, MOTOR_GROUP_FAULT, member_fault_mask(group), group->cb_user_data);
-		}
+		enable_async_finish(slot, MOTOR_GROUP_FAULT, member_fault_mask(group));
 		return;
 	}
 
 	fm = member_fault_mask(group);
 	if (fm != 0U) {
-		k_spinlock_key_t key = k_spin_lock(&group->lock);
-
-		group->state = MOTOR_GROUP_FAULT;
-		k_spin_unlock(&group->lock, key);
-
-		apply_fault_policy(group);
-
-		slot->in_use = false;
-		slot->group = NULL;
-
-		if (group->cb != NULL) {
-			group->cb(group, MOTOR_GROUP_FAULT, fm, group->cb_user_data);
-		}
+		enable_async_finish(slot, MOTOR_GROUP_FAULT, fm);
 		return;
 	}
 
 	if (members_all_in_state(group, MOTOR_STATE_RUN)) {
-		k_spinlock_key_t key = k_spin_lock(&group->lock);
-
-		group->state = MOTOR_GROUP_RUN;
-		k_spin_unlock(&group->lock, key);
-
-		slot->in_use = false;
-		slot->group = NULL;
-
-		if (group->cb != NULL) {
-			group->cb(group, MOTOR_GROUP_RUN, 0U, group->cb_user_data);
-		}
+		enable_async_finish(slot, MOTOR_GROUP_RUN, 0U);
 		return;
 	}
 
