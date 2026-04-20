@@ -78,6 +78,21 @@ extern "C" {
  * Naming is **physical / axis-neutral**: torque vs flux components, not FOC-only.
  * Each algorithm maps these to its internal representation (e.g. Id/Iq, Ia, duty).
  *
+ * Inter-block bus
+ * ---------------
+ * This struct is the canonical wire between pipeline stages: outer blocks (or
+ * the application) write the higher-level reference, intermediate blocks may
+ * translate it (e.g. position_loop produces omega_mech_rad_s, speed_loop
+ * produces i_torque_a), and the inner block consumes it. Producer/consumer
+ * roles per field:
+ *
+ *   theta_mech_rad     produced by app/trajectory   consumed by position loop
+ *   omega_mech_rad_s   produced by position loop    consumed by speed loop
+ *   i_torque_a         produced by speed loop / app consumed by inner current
+ *   i_flux_a           produced by app / FOC outer  consumed by inner current
+ *   v_torque_v / v_flux_v   open-loop overrides (consumed by inner current)
+ *   drive_mode         set by app or supervision    consumed by inner / power stage
+ *
  * Written by outer loops or the application; read by @ref motor_algo_ops.inner_step
  * in ISR context.
  */
@@ -193,13 +208,26 @@ struct motor_ctrl_params {
  *   - @ref inner_step — ISR (power-stage callback), highest rate.
  *   - @ref outer_step_0 — outer thread, faster cadence (e.g. ~1 kHz).
  *   - @ref outer_step_1 — same thread, lower cadence (e.g. ~100 Hz); may be NULL.
+ *
+ * @note **Transitional layout.** This 3-slot vtable will be replaced by an
+ * N-block pipeline (see @c motor_block.h / @c motor_pipeline.h skeletons).
+ * In the migrated model an algorithm is an array of @c motor_block instances,
+ * each declaring its own @c stage and @c period_div, instead of three fixed
+ * slots. Algorithms should keep their state self-contained (no assumptions on
+ * exactly three entry points) so that the move to a single block array is
+ * mechanical. The @c algo_data pointer becomes the top-level @c motor_pipeline
+ * object; cross-block context lives there and is reached via @c CONTAINER_OF
+ * inside each block.
  */
 struct motor_algo_ops {
 	/**
 	 * @brief Initialise algorithm state.
 	 * Called once when entering RUN state.
 	 *
-	 * @param algo_data  Per-algorithm private state pointer.
+	 * @param algo_data  Per-algorithm private state pointer. The motor controller
+	 *                   never sizes or accesses it — storage is caller-owned and
+	 *                   fully opaque, which lets the future pipeline replace this
+	 *                   pointer by a @c motor_pipeline instance with no churn here.
 	 * @param params     Initial parameter set.
 	 * @retval 0 on success, negative errno on failure.
 	 */
