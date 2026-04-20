@@ -412,24 +412,6 @@ int motor_group_clear_fault(struct motor_group *group);
 int motor_group_set_torque(struct motor_group *group, const float *torques);
 
 /**
- * @brief Write speed setpoints to all group members atomically.
- *
- * @param group   Group instance.
- * @param speeds  Array of speeds (RPM), length = group->count.
- * @retval 0 on success. -ENOEXEC if group not in RUN state.
- */
-int motor_group_set_speed(struct motor_group *group, const float *speeds);
-
-/**
- * @brief Write position setpoints to all group members atomically.
- *
- * @param group    Group instance.
- * @param angles   Array of target angles (degrees), length = group->count.
- * @retval 0 on success. -ENOEXEC if group not in RUN state.
- */
-int motor_group_set_position(struct motor_group *group, const float *angles);
-
-/**
  * @brief Set drive mode on all group members.
  *
  * @param group  Group instance.

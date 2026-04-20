@@ -101,22 +101,6 @@ int motor_set_torque(motor_t motor, float torque_nm)
 	return 0;
 }
 
-int motor_set_speed(motor_t motor, float speed_rpm)
-{
-	ARG_UNUSED(motor);
-	ARG_UNUSED(speed_rpm);
-
-	return -ENOTSUP;
-}
-
-int motor_set_position(motor_t motor, float angle_deg)
-{
-	ARG_UNUSED(motor);
-	ARG_UNUSED(angle_deg);
-
-	return -ENOTSUP;
-}
-
 int motor_set_drive_mode(motor_t motor, enum motor_drive_mode mode)
 {
 	if (motor == NULL) {
@@ -158,35 +142,4 @@ int motor_clear_fault(motor_t motor)
 	}
 
 	return motor_ctrl_clear_fault(motor);
-}
-
-int motor_sto_arm(motor_t motor)
-{
-	ARG_UNUSED(motor);
-
-	return -ENOTSUP;
-}
-
-int motor_sto_release(motor_t motor, uint32_t *faults)
-{
-	ARG_UNUSED(motor);
-	if (faults != NULL) {
-		*faults = 0U;
-	}
-
-	return -ENOTSUP;
-}
-
-int motor_params_save(motor_t motor)
-{
-	ARG_UNUSED(motor);
-
-	return -ENOTSUP;
-}
-
-int motor_params_load(motor_t motor)
-{
-	ARG_UNUSED(motor);
-
-	return -ENOTSUP;
 }

@@ -42,8 +42,8 @@ extern "C" {
  * Valid commands per state:
  *   IDLE   : motor_enable(), motor_self_test(), motor_set_params()
  *   ALIGN  : none (wait for motor_state_cb MOTOR_STATE_RUN)
- *   RUN    : motor_set_torque(), motor_set_speed(), motor_set_position(),
- *            motor_set_drive_mode(), motor_disable(), motor_estop()
+ *   RUN    : motor_set_torque(), motor_set_drive_mode(),
+ *            motor_disable(), motor_estop()
  *   STOP   : motor_estop()
  *   FAULT  : motor_clear_fault(), motor_estop()
  */
@@ -175,30 +175,6 @@ void motor_estop(motor_t motor);
 int motor_set_torque(motor_t motor, float torque_nm);
 
 /**
- * @brief Set speed command (speed control mode).
- *
- * Switches to MOTOR_MODE_SPEED if not already.
- * Valid only in RUN state.
- *
- * @param motor       Motor handle.
- * @param speed_rpm   Target speed (RPM). Positive = forward.
- * @retval 0 on success, -ENOTSUP if algorithm does not support speed mode.
- */
-int motor_set_speed(motor_t motor, float speed_rpm);
-
-/**
- * @brief Set position command (position control mode).
- *
- * Switches to MOTOR_MODE_POSITION if not already.
- * Valid only in RUN state.
- *
- * @param motor      Motor handle.
- * @param angle_deg  Target mechanical angle (degrees).
- * @retval 0 on success, -ENOTSUP if algorithm does not support position mode.
- */
-int motor_set_position(motor_t motor, float angle_deg);
-
-/**
  * @brief Set drive mode (normal / coast / brake / regen).
  *
  * @param motor  Motor handle.
@@ -237,66 +213,6 @@ void motor_get_status(motor_t motor, enum motor_state *state, uint32_t *faults,
  * @retval 0 on success, -EBUSY if fault cause still present.
  */
 int motor_clear_fault(motor_t motor);
-
-/**
- * @brief Arm the Safe Torque Off (STO) path (ANY → STO).
- *
- * Activates dual-channel STO hardware monitoring. When the STO
- * inputs assert, the power stage immediately inhibits all PWM
- * outputs without CPU intervention.
- *
- * May be called from any state. The motor transitions to
- * MOTOR_STATE_STO; application is notified via state_cb.
- *
- * @param motor  Motor handle.
- * @retval 0 on success.
- * @retval -ENOTSUP if no STO hardware is present in the DT node.
- */
-int motor_sto_arm(motor_t motor);
-
-/**
- * @brief Release STO and return to IDLE.
- *
- * Both STO hardware channels must be de-asserted. An internal
- * self-test of the STO path is performed (ASIL-B requirement)
- * before outputs are re-enabled.
- *
- * @param motor   Motor handle.
- * @param faults  Output: MOTOR_FAULT_STO_MISMATCH if dual-channel
- *                discrepancy was detected during self-test.
- * @retval 0 on success.
- * @retval -EBUSY if STO inputs still asserted.
- * @retval -EIO   if STO path self-test failed.
- */
-int motor_sto_release(motor_t motor, uint32_t *faults);
-
-/**
- * @brief Persist current control parameters to Zephyr settings subsystem.
- *
- * Writes motor_ctrl_params to NVS under the key prefix "motor/<label>/".
- * Parameters are automatically reloaded at the next boot via
- * settings_load_subtree().
- *
- * Motor-specific tuning held in algorithm private state is not described
- * here — only @ref motor_ctrl_params fields are considered for persistence.
- *
- * @param motor  Motor handle.
- * @retval 0 on success.
- * @retval negative errno on settings write failure.
- */
-int motor_params_save(motor_t motor);
-
-/**
- * @brief Load previously persisted parameters from Zephyr settings.
- *
- * If no saved parameters exist for this motor label, the function
- * returns 0 and the current (default) parameters are unchanged.
- *
- * @param motor  Motor handle.
- * @retval 0 on success or no saved data found.
- * @retval negative errno on settings read failure.
- */
-int motor_params_load(motor_t motor);
 
 /**
  * @}
