@@ -28,6 +28,41 @@ typedef int (*motor_actuator_set_vector_fn)(const struct device *dev, float valp
 typedef int (*motor_actuator_set_duty_fn)(const struct device *dev, const float *duty, uint8_t n);
 
 /**
+ * @brief Default self_test op: no diagnostics, always passes.
+ *
+ * Drivers without a hardware self-test should plug this directly into their
+ * motor_actuator_ops.self_test slot.
+ */
+static inline int motor_actuator_self_test_noop(const struct device *dev, uint32_t *flags)
+{
+	ARG_UNUSED(dev);
+
+	if (flags != NULL) {
+		*flags = 0U;
+	}
+	return 0;
+}
+
+/** @brief Default sto_arm op for stages without dedicated STO hardware. */
+static inline int motor_actuator_sto_arm_unsupported(const struct device *dev)
+{
+	ARG_UNUSED(dev);
+
+	return -ENOTSUP;
+}
+
+/** @brief Default sto_release op for stages without dedicated STO hardware. */
+static inline int motor_actuator_sto_release_unsupported(const struct device *dev, uint32_t *flags)
+{
+	ARG_UNUSED(dev);
+
+	if (flags != NULL) {
+		*flags = 0U;
+	}
+	return -ENOTSUP;
+}
+
+/**
  * @brief Generic motor_actuator_ops.set_command dispatch.
  *
  * Validates the command shape and routes it to the driver-supplied set_vector

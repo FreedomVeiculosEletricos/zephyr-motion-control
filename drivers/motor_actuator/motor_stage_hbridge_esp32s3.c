@@ -275,40 +275,11 @@ static int hbridge_esp32s3_get_fault(const struct device *dev, uint32_t *flags)
 	return 0;
 }
 
-static int hbridge_esp32s3_self_test(const struct device *dev, uint32_t *flags)
-{
-	ARG_UNUSED(dev);
-
-	if (flags != NULL) {
-		*flags = 0U;
-	}
-
-	return 0;
-}
-
 static const struct motor_stage_config *hbridge_esp32s3_get_config(const struct device *dev)
 {
 	const struct motor_hbridge_esp32s3_config *cfg = dev->config;
 
 	return &cfg->stage_cfg;
-}
-
-static int hbridge_esp32s3_sto_arm(const struct device *dev)
-{
-	ARG_UNUSED(dev);
-
-	return -ENOTSUP;
-}
-
-static int hbridge_esp32s3_sto_release(const struct device *dev, uint32_t *flags)
-{
-	ARG_UNUSED(dev);
-
-	if (flags != NULL) {
-		*flags = 0U;
-	}
-
-	return -ENOTSUP;
 }
 
 static int hbridge_esp32s3_disable_outputs(const struct device *dev)
@@ -473,10 +444,10 @@ static const struct motor_actuator_ops motor_hbridge_esp32s3_api = {
 	.set_fault_callback = hbridge_esp32s3_set_fault_callback,
 	.clear_fault = hbridge_esp32s3_clear_fault,
 	.get_fault = hbridge_esp32s3_get_fault,
-	.self_test = hbridge_esp32s3_self_test,
+	.self_test = motor_actuator_self_test_noop,
 	.get_config = hbridge_esp32s3_get_config,
-	.sto_arm = hbridge_esp32s3_sto_arm,
-	.sto_release = hbridge_esp32s3_sto_release,
+	.sto_arm = motor_actuator_sto_arm_unsupported,
+	.sto_release = motor_actuator_sto_release_unsupported,
 	.invoke_control_callback = hbridge_esp32s3_invoke_cb,
 };
 
