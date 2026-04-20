@@ -59,46 +59,18 @@ static uint32_t member_fault_mask(const struct motor_group *group)
 	return mask;
 }
 
-static bool members_all_run(const struct motor_group *group)
+static bool members_all_in_state(const struct motor_group *group, enum motor_state target)
 {
 	for (uint8_t i = 0; i < group->count; i++) {
 		enum motor_state st;
 
 		motor_get_status(group->members[i], &st, NULL, NULL);
-		if (st != MOTOR_STATE_RUN) {
+		if (st != target) {
 			return false;
 		}
 	}
 
 	return true;
-}
-
-static bool members_all_idle(const struct motor_group *group)
-{
-	for (uint8_t i = 0; i < group->count; i++) {
-		enum motor_state st;
-
-		motor_get_status(group->members[i], &st, NULL, NULL);
-		if (st != MOTOR_STATE_IDLE) {
-			return false;
-		}
-	}
-
-	return true;
-}
-
-static int members_require_all_idle(const struct motor_group *group)
-{
-	for (uint8_t i = 0; i < group->count; i++) {
-		enum motor_state st;
-
-		motor_get_status(group->members[i], &st, NULL, NULL);
-		if (st != MOTOR_STATE_IDLE) {
-			return -EBUSY;
-		}
-	}
-
-	return 0;
 }
 
 static void apply_fault_policy(struct motor_group *group)
@@ -167,7 +139,7 @@ static void enable_async_work_handler(struct k_work *work)
 		return;
 	}
 
-	if (members_all_run(group)) {
+	if (members_all_in_state(group, MOTOR_STATE_RUN)) {
 		k_spinlock_key_t key = k_spin_lock(&group->lock);
 
 		group->state = MOTOR_GROUP_RUN;
@@ -366,7 +338,7 @@ int motor_group_enable(struct motor_group *group, k_timeout_t timeout)
 
 	k_spin_unlock(&group->lock, key);
 
-	ret = members_require_all_idle(group);
+	ret = members_all_in_state(group, MOTOR_STATE_IDLE) ? 0 : -EBUSY;
 	if (ret != 0) {
 		return ret;
 	}
@@ -399,7 +371,7 @@ int motor_group_enable(struct motor_group *group, k_timeout_t timeout)
 			return -EFAULT;
 		}
 
-		if (members_all_run(group)) {
+		if (members_all_in_state(group, MOTOR_STATE_RUN)) {
 			key = k_spin_lock(&group->lock);
 			group->state = MOTOR_GROUP_RUN;
 			k_spin_unlock(&group->lock, key);
@@ -436,7 +408,7 @@ int motor_group_enable_async(struct motor_group *group)
 
 	k_spin_unlock(&group->lock, key);
 
-	ret = members_require_all_idle(group);
+	ret = members_all_in_state(group, MOTOR_STATE_IDLE) ? 0 : -EBUSY;
 	if (ret != 0) {
 		return ret;
 	}
@@ -497,7 +469,7 @@ int motor_group_disable(struct motor_group *group, k_timeout_t timeout)
 	}
 
 	while (k_uptime_ticks() < deadline) {
-		if (members_all_idle(group)) {
+		if (members_all_in_state(group, MOTOR_STATE_IDLE)) {
 			key = k_spin_lock(&group->lock);
 			group->state = MOTOR_GROUP_IDLE;
 			k_spin_unlock(&group->lock, key);
