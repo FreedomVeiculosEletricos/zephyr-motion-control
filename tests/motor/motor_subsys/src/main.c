@@ -4,295 +4,34 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <string.h>
-
 #include <zephyr/device.h>
-#include <zephyr/drivers/motor/motor_actuator.h>
-#include <zephyr/drivers/motor/motor_sensor.h>
-#include <zephyr/subsys/motor/motor_algo_dc_torque.h>
 #include <zephyr/subsys/motor/motor.h>
+#include <zephyr/subsys/motor/motor_algo_dc_torque.h>
 #include <zephyr/subsys/motor/motor_subsys.h>
 #include <zephyr/ztest.h>
 
-static struct motor_sensor_output fake_out_a;
-static struct motor_sensor_output fake_out_b;
+#include "motor_test_fake.h"
 
-static int fs_init(const struct device *dev, const struct motor_sensor_cal *cal)
-{
-	ARG_UNUSED(dev);
-	ARG_UNUSED(cal);
-	return 0;
-}
-
-static int fs_update(const struct device *dev)
-{
-	ARG_UNUSED(dev);
-	return 0;
-}
-
-static int fs_get_a(const struct device *dev, struct motor_sensor_output *out)
-{
-	ARG_UNUSED(dev);
-	*out = fake_out_a;
-	return 0;
-}
-
-static int fs_get_b(const struct device *dev, struct motor_sensor_output *out)
-{
-	ARG_UNUSED(dev);
-	*out = fake_out_b;
-	return 0;
-}
-
-static int fs_cal(const struct device *dev)
-{
-	ARG_UNUSED(dev);
-	return 0;
-}
-
-static void fs_types(const struct device *dev, enum motor_pos_backend_type *pos_type,
-		     enum motor_cur_backend_type *cur_type)
-{
-	ARG_UNUSED(dev);
-	if (pos_type != NULL) {
-		*pos_type = MOTOR_POS_NONE;
-	}
-	if (cur_type != NULL) {
-		*cur_type = MOTOR_CUR_1SHUNT_DCLINK;
-	}
-}
-
-static const struct motor_sensor_ops fake_sensor_ops_a = {
-	.init = fs_init,
-	.update = fs_update,
-	.get = fs_get_a,
-	.calibrate = fs_cal,
-	.get_backend_types = fs_types,
-};
-
-static const struct motor_sensor_ops fake_sensor_ops_b = {
-	.init = fs_init,
-	.update = fs_update,
-	.get = fs_get_b,
-	.calibrate = fs_cal,
-	.get_backend_types = fs_types,
-};
-
-static struct {
-	int dummy;
-} fs_data_a, fs_data_b;
-
-static motor_control_cb_t g_cb_a;
-static void *g_ud_a;
-static motor_control_cb_t g_cb_b;
-static void *g_ud_b;
-
-static int fa_dev_init(const struct device *dev)
-{
-	ARG_UNUSED(dev);
-	return 0;
-}
-
-static int fa_enable(const struct device *dev)
-{
-	ARG_UNUSED(dev);
-	return 0;
-}
-
-static int fa_disable(const struct device *dev)
-{
-	ARG_UNUSED(dev);
-	return 0;
-}
-
-static int fa_cmd(const struct device *dev, const struct motor_actuator_cmd *cmd)
-{
-	ARG_UNUSED(dev);
-	ARG_UNUSED(cmd);
-	return 0;
-}
-
-static int fa_duty(const struct device *dev, const float *duty, uint8_t n)
-{
-	ARG_UNUSED(dev);
-	ARG_UNUSED(duty);
-	ARG_UNUSED(n);
-	return -ENOTSUP;
-}
-
-static int fa_mode(const struct device *dev, enum motor_drive_mode mode)
-{
-	ARG_UNUSED(dev);
-	ARG_UNUSED(mode);
-	return 0;
-}
-
-static int fa_set_cb_a(const struct device *dev, motor_control_cb_t cb, void *user_data)
-{
-	ARG_UNUSED(dev);
-	g_cb_a = cb;
-	g_ud_a = user_data;
-	return 0;
-}
-
-static int fa_set_cb_b(const struct device *dev, motor_control_cb_t cb, void *user_data)
-{
-	ARG_UNUSED(dev);
-	g_cb_b = cb;
-	g_ud_b = user_data;
-	return 0;
-}
-
-static int fa_fault_cb(const struct device *dev, motor_fault_cb_t cb, void *user_data)
-{
-	ARG_UNUSED(dev);
-	ARG_UNUSED(cb);
-	ARG_UNUSED(user_data);
-	return 0;
-}
-
-static int fa_clr_fault(const struct device *dev)
-{
-	ARG_UNUSED(dev);
-	return 0;
-}
-
-static int fa_get_fault(const struct device *dev, uint32_t *flags)
-{
-	ARG_UNUSED(dev);
-	if (flags != NULL) {
-		*flags = 0U;
-	}
-	return 0;
-}
-
-static int fa_self_test(const struct device *dev, uint32_t *flags)
-{
-	ARG_UNUSED(dev);
-	if (flags != NULL) {
-		*flags = 0U;
-	}
-	return 0;
-}
-
-static const struct motor_stage_config fake_cfg = {
-	.topology = MOTOR_STAGE_FULL_BRIDGE,
-	.n_phases = 1U,
-	.pwm_period_ns = 50000U,
-	.deadtime_rising_ns = 0U,
-	.deadtime_falling_ns = 0U,
-	.v_bus_nominal = 12.0f,
-	.v_bus_ov_thresh = 30.0f,
-	.v_bus_uv_thresh = 6.0f,
-	.i_peak_limit = 20.0f,
-};
-
-static const struct motor_stage_config *fa_cfg(const struct device *dev)
-{
-	ARG_UNUSED(dev);
-	return &fake_cfg;
-}
-
-static int fa_sto_arm(const struct device *dev)
-{
-	ARG_UNUSED(dev);
-	return -ENOTSUP;
-}
-
-static int fa_sto_rel(const struct device *dev, uint32_t *flags)
-{
-	ARG_UNUSED(dev);
-	if (flags != NULL) {
-		*flags = 0U;
-	}
-	return -ENOTSUP;
-}
-
-static void fa_invoke_a(const struct device *dev)
-{
-	if (g_cb_a != NULL) {
-		g_cb_a(dev, g_ud_a);
-	}
-}
-
-static void fa_invoke_b(const struct device *dev)
-{
-	if (g_cb_b != NULL) {
-		g_cb_b(dev, g_ud_b);
-	}
-}
-
-static const struct motor_actuator_ops fake_actuator_ops_a = {
-	.init = fa_dev_init,
-	.enable = fa_enable,
-	.disable = fa_disable,
-	.set_command = fa_cmd,
-	.set_duty = fa_duty,
-	.set_drive_mode = fa_mode,
-	.set_control_callback = fa_set_cb_a,
-	.set_fault_callback = fa_fault_cb,
-	.clear_fault = fa_clr_fault,
-	.get_fault = fa_get_fault,
-	.self_test = fa_self_test,
-	.get_config = fa_cfg,
-	.sto_arm = fa_sto_arm,
-	.sto_release = fa_sto_rel,
-	.invoke_control_callback = fa_invoke_a,
-};
-
-static const struct motor_actuator_ops fake_actuator_ops_b = {
-	.init = fa_dev_init,
-	.enable = fa_enable,
-	.disable = fa_disable,
-	.set_command = fa_cmd,
-	.set_duty = fa_duty,
-	.set_drive_mode = fa_mode,
-	.set_control_callback = fa_set_cb_b,
-	.set_fault_callback = fa_fault_cb,
-	.clear_fault = fa_clr_fault,
-	.get_fault = fa_get_fault,
-	.self_test = fa_self_test,
-	.get_config = fa_cfg,
-	.sto_arm = fa_sto_arm,
-	.sto_release = fa_sto_rel,
-	.invoke_control_callback = fa_invoke_b,
-};
-
-static struct {
-	int dummy;
-} fa_data_a, fa_data_b;
-
-DEVICE_DEFINE(fake_motor_sensor_a, "fake_motor_sensor_a", NULL, NULL, &fs_data_a, NULL, POST_KERNEL,
-	      CONFIG_KERNEL_INIT_PRIORITY_DEVICE, &fake_sensor_ops_a);
-
-DEVICE_DEFINE(fake_motor_actuator_a, "fake_motor_actuator_a", fa_dev_init, NULL, &fa_data_a, NULL,
-	      POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE, &fake_actuator_ops_a);
-
-DEVICE_DEFINE(fake_motor_sensor_b, "fake_motor_sensor_b", NULL, NULL, &fs_data_b, NULL, POST_KERNEL,
-	      CONFIG_KERNEL_INIT_PRIORITY_DEVICE, &fake_sensor_ops_b);
-
-DEVICE_DEFINE(fake_motor_actuator_b, "fake_motor_actuator_b", fa_dev_init, NULL, &fa_data_b, NULL,
-	      POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE, &fake_actuator_ops_b);
+MOTOR_TEST_FAKE_DEFINE(motor_a);
+MOTOR_TEST_FAKE_DEFINE(motor_b);
 
 static struct motor_ctrl ctrl_a;
 static struct motor_ctrl ctrl_b;
 static struct motor_algo_dc_torque_data algo_a = {
-	.current_loop =
-		{
-			.kp = 0.5f,
-			.ki = 2000.0f,
-			.out_min = -1.0f,
-			.out_max = 1.0f,
-		},
+	.current_loop = {
+		.kp = 0.5f,
+		.ki = 2000.0f,
+		.out_min = -1.0f,
+		.out_max = 1.0f,
+	},
 };
 static struct motor_algo_dc_torque_data algo_b = {
-	.current_loop =
-		{
-			.kp = 0.5f,
-			.ki = 2000.0f,
-			.out_min = -1.0f,
-			.out_max = 1.0f,
-		},
+	.current_loop = {
+		.kp = 0.5f,
+		.ki = 2000.0f,
+		.out_min = -1.0f,
+		.out_max = 1.0f,
+	},
 };
 
 static const struct motor_ctrl_params test_params = {
@@ -304,26 +43,20 @@ static const struct motor_ctrl_params test_params = {
 
 static motor_t make_motor_a(void)
 {
-	const struct device *s = DEVICE_GET(fake_motor_sensor_a);
-	const struct device *a = DEVICE_GET(fake_motor_actuator_a);
+	motor_a.sense.hot.i_phase[0] = 0.0f;
+	motor_a.sense.hot.valid_current = true;
 
-	memset(&fake_out_a, 0, sizeof(fake_out_a));
-	fake_out_a.hot.i_phase[0] = 0.0f;
-	fake_out_a.hot.valid_current = true;
-
-	return motor_init(&ctrl_a, s, a, &motor_algo_dc_torque, &algo_a, &test_params);
+	return motor_init(&ctrl_a, DEVICE_GET(motor_a_sensor), DEVICE_GET(motor_a_actuator),
+			  &motor_algo_dc_torque, &algo_a, &test_params);
 }
 
 static motor_t make_motor_b(void)
 {
-	const struct device *s = DEVICE_GET(fake_motor_sensor_b);
-	const struct device *act = DEVICE_GET(fake_motor_actuator_b);
+	motor_b.sense.hot.i_phase[0] = 0.0f;
+	motor_b.sense.hot.valid_current = true;
 
-	memset(&fake_out_b, 0, sizeof(fake_out_b));
-	fake_out_b.hot.i_phase[0] = 0.0f;
-	fake_out_b.hot.valid_current = true;
-
-	return motor_init(&ctrl_b, s, act, &motor_algo_dc_torque, &algo_b, &test_params);
+	return motor_init(&ctrl_b, DEVICE_GET(motor_b_sensor), DEVICE_GET(motor_b_actuator),
+			  &motor_algo_dc_torque, &algo_b, &test_params);
 }
 
 MOTOR_GROUP_DEFINE(g_null, "g_null");
