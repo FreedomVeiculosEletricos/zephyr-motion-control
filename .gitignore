@@ -21,3 +21,4 @@ robot_output.xml
 /simulator/
 /snapshots/
 /.cache/
+/.cursor/
