@@ -11,49 +11,33 @@
 
 #include <zephyr/subsys/motor/motor_block.h>
 #include <zephyr/subsys/motor/motor_controller.h>
+#include <zephyr/sys/util.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /**
- * @file
- * @brief Skeleton for the upcoming N-block control pipeline.
- *
- * A @c motor_pipeline is an ordered array of @ref motor_block pointers, plus
- * optional pipeline-level hooks (init/reset/set_params) for cross-block
- * concerns. The first revision has no runtime: the structure and macros are
- * defined here so authors can model their algorithms against the final shape
- * while the controller still runs the @ref motor_algo_ops 3-slot vtable.
- *
- * Migration plan (future patches):
- *   1. Implement @c motor_pipeline_run_stage(pipeline, stage, in, out) in
- *      subsys/motor_pipeline.c.
- *   2. Make @ref motor_ctrl accept a @c motor_pipeline as @c algo_data and
- *      route motor_ctrl_run_inner/outer to motor_pipeline_run_stage.
- *   3. Migrate @c motor_algo_dc_current to a single-block pipeline.
- *   4. Remove @c motor_algo_ops.
+ * Default implementation in @c motor_pipeline.c that walks @c blocks and calls
+ * each @c .init is subsystem-internal (see motor_ctrl_priv.h). Optional
+ * @c motor_pipeline::init / @c reset / @c set_params hooks are for custom pipelines.
  */
 
 struct motor_pipeline;
 
-/** Optional pipeline-level hooks. */
-typedef int (*motor_pipeline_init_t)(struct motor_pipeline *self,
-				     const struct motor_ctrl_params *params);
-typedef void (*motor_pipeline_reset_t)(struct motor_pipeline *self);
-typedef void (*motor_pipeline_set_params_t)(struct motor_pipeline *self,
-					    const struct motor_ctrl_params *params);
+typedef int (*motor_pipeline_init_t)(struct motor_pipeline *pipeline, void *ctx);
+typedef void (*motor_pipeline_reset_t)(struct motor_pipeline *pipeline, void *ctx);
+typedef void (*motor_pipeline_set_params_t)(struct motor_pipeline *pipeline, void *ctx);
 
 /**
- * @brief Pipeline = ordered array of blocks plus optional top-level hooks.
+ * @brief Ordered list of @ref motor_block plus optional top-level hooks.
  *
- * @c blocks is sorted such that all blocks of the same stage are contiguous;
- * the controller iterates @c blocks at each stage tick and runs every block
- * whose @c period_div fires.
+ * @c blocks lists every block for all stages; @ref motor_pipeline_run_stage
+ * filters by @c stage and @c period_div.
  */
 struct motor_pipeline {
 	const char *name;
-	struct motor_block * const *blocks;
+	struct motor_block *const *blocks;
 	uint8_t n_blocks;
 	motor_pipeline_init_t init;
 	motor_pipeline_reset_t reset;
@@ -61,23 +45,27 @@ struct motor_pipeline {
 };
 
 /**
- * @brief Define a @c motor_pipeline literal listing its blocks.
+ * @brief Run every block whose @c stage and @c period_div match this tick.
  *
- * Future macro shape (placeholder, expects the runtime to be implemented):
- *
- * @code
- * MOTOR_PIPELINE_DEFINE(my_dc_current, &my_pi.base);
- * @endcode
- *
- * For now the macro is a thin wrapper around an aggregate initializer; the
- * generated symbol becomes useful once @c motor_pipeline_run_stage exists.
+ * @param stage_tick  Value of @c motor_ctrl::stage_tick[stage] for this invocation
+ *                    (modulo scheduling; incremented by the controller after the pass).
+ */
+void motor_pipeline_run_stage(struct motor_pipeline *pipeline, void *ctx,
+			      enum motor_pipeline_stage stage, uint32_t stage_tick,
+			      const struct motor_block_in *in, struct motor_block_out *out);
+
+/**
+ * @brief Static pipeline instance: one block pointer list.
  */
 #define MOTOR_PIPELINE_DEFINE(_name, ...)                                                          \
-	static struct motor_block * const _name##_blocks[] = { __VA_ARGS__ };                      \
+	static struct motor_block *const _name##_blocks[] = {__VA_ARGS__};                           \
 	static struct motor_pipeline _name = {                                                     \
 		.name = #_name,                                                                    \
 		.blocks = _name##_blocks,                                                          \
 		.n_blocks = (uint8_t)ARRAY_SIZE(_name##_blocks),                                   \
+		.init = NULL,                                                                      \
+		.reset = NULL,                                                                     \
+		.set_params = NULL,                                                                \
 	}
 
 #ifdef __cplusplus

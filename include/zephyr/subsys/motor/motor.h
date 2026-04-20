@@ -20,9 +20,18 @@ extern "C" {
  * @ingroup motor_control
  * @{
  *
- * This is the only API an application should use.
- * It is motor-type agnostic — the same calls work for DC brushed,
- * BLDC, PMSM, stepper, and AC induction motors.
+ * Use this for generic commands and state (enable, torque setpoint, faults).
+ * Tunable parameters depend on the active pipeline: each predefined algorithm
+ * module exposes its own public header (e.g. @ref motor_algo_dc_current.h under
+ * @c motor/algorithms/dc_current/).
+ * Custom pipelines use the same block/pipeline extension points without going
+ * through this facade.
+ *
+ * It is motor-type agnostic at this layer — the same calls apply across
+ * motor families where the installed pipeline supports them.
+ *
+ * The application does not use this header for algorithm tuning (gains, limits,
+ * observers) — those live in each predefined algorithm’s public API.
  *
  * The application does not know about:
  *   - PWM timers, ADC channels, GPIO pins
@@ -30,9 +39,14 @@ extern "C" {
  *   - Sensor backends (encoder vs sensorless vs Hall)
  *   - Phase count or topology
  *
+ * Instances are registered with @c MOTOR_SUBSYS_DEFINE_DT (or @c MOTOR_SUBSYS_DEFINE);
+ * sensor, actuator, pipeline, algorithm data, and rates come from Devicetree and
+ * static initialisers — there is no application-level “init” beyond Zephyr
+ * @c SYS_INIT running @ref motor_subsys_init when @c CONFIG_MOTOR_SUBSYS_AUTO_INIT is set.
+ * Obtain a handle with @ref motor_subsys_get_by_label or @ref motor_subsys_get_by_index.
+ *
  * State machine summary:
  *
- *   motor_init()    → UNINIT  → IDLE
  *   motor_enable()  → IDLE    → ALIGN (if needed) → RUN
  *   motor_disable() → RUN     → STOP  → IDLE
  *   motor_estop()   → ANY     → IDLE  (output cut immediately)
@@ -40,7 +54,7 @@ extern "C" {
  *   motor_clear_fault() → FAULT → IDLE (if cause resolved)
  *
  * Valid commands per state:
- *   IDLE   : motor_enable(), motor_self_test(), motor_set_params()
+ *   IDLE   : motor_enable(), motor_self_test()
  *   ALIGN  : none (wait for motor_state_cb MOTOR_STATE_RUN)
  *   RUN    : motor_set_torque(), motor_set_drive_mode(),
  *            motor_disable(), motor_estop()
@@ -51,24 +65,6 @@ extern "C" {
 /* ------------------------------------------------------------------ */
 /* Interface A — application API                                       */
 /* ------------------------------------------------------------------ */
-
-/**
- * @brief Initialise a motor instance and return a handle.
- *
- * Wires the controller to its sensor and actuator backends (looked
- * up by device name from devicetree), applies initial params.
- *
- * @param ctrl      Pre-allocated controller instance (MOTOR_CTRL_DEFINE).
- * @param sensor    Sensor backend device.
- * @param actuator  Power stage backend device.
- * @param algo      Algorithm vtable (e.g. &motor_algo_foc, &motor_algo_6step).
- * @param algo_data Algorithm private state buffer.
- * @param params    Initial parameters (required); from Devicetree via subsystem macros.
- * @return          Motor handle on success, NULL on failure.
- */
-motor_t motor_init(struct motor_ctrl *ctrl, const struct device *sensor,
-		   const struct device *actuator, const struct motor_algo_ops *algo,
-		   void *algo_data, const struct motor_ctrl_params *params);
 
 /**
  * @brief Register application callbacks.
@@ -125,12 +121,13 @@ void motor_estop(motor_t motor);
 /**
  * @brief Set torque command (current control mode).
  *
- * Switches to MOTOR_MODE_CURRENT if not already.
- * Valid only in RUN state.
+ * Maps torque to an inner-loop current reference according to the active
+ * pipeline (e.g. DC current uses @c kt_nm_per_a in @ref motor_algo_dc_current_data).
+ * Switches to @c MOTOR_MODE_CURRENT. Valid only in RUN state.
  *
  * @param motor      Motor handle.
  * @param torque_nm  Target torque (N·m). Positive = forward.
- * @retval 0 on success, -ENOTSUP if algorithm does not support torque mode.
+ * @retval 0 on success, -EINVAL if mapping is unavailable or invalid.
  */
 int motor_set_torque(motor_t motor, float torque_nm);
 
@@ -144,24 +141,12 @@ int motor_set_torque(motor_t motor, float torque_nm);
 int motor_set_drive_mode(motor_t motor, enum motor_drive_mode mode);
 
 /**
- * @brief Update controller parameters at runtime.
- *
- * Thread context only. Parameters are applied before the next
- * current-loop execution via double-buffer swap.
- *
- * @param motor   Motor handle.
- * @param params  New parameters (full struct — partial updates not supported).
- * @retval 0 on success, negative errno on failure.
- */
-int motor_set_params(motor_t motor, const struct motor_ctrl_params *params);
-
-/**
  * @brief Read current motor status.
  *
  * @param motor   Motor handle.
  * @param state   Output: current state machine state.
  * @param faults  Output: current fault bitmask.
- * @param sense   Output: latest sensor snapshot (may be NULL).
+ * @param sense   Output: sensor read via the backend (may be NULL; not synchronized with ISR).
  */
 void motor_get_status(motor_t motor, enum motor_state *state, uint32_t *faults,
 		      struct motor_sensor_output *sense);

@@ -10,26 +10,41 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/motor/motor_actuator.h>
 #include <zephyr/subsys/motor/motor.h>
-#include <zephyr/subsys/motor/motor_algo_dc_current.h>
+#include <zephyr/subsys/motor/algorithms/dc_current/motor_algo_dc_current.h>
+#include <zephyr/subsys/motor/motor_controller.h>
+#include <zephyr/subsys/motor/motor_ctrl_priv.h>
+#include <zephyr/subsys/motor/motor_pipeline.h>
 #include <zephyr/ztest.h>
 
 #include "motor_test_fake.h"
 
 static struct motor_ctrl ctrl;
-static const struct motor_ctrl_params pipeline_params = {
-	.limits = {.i_max_a = 5.0f},
-	.timing = {.control_loop_dt_s = 1.0f / 20000.0f},
-	.kt_nm_per_a = 0.05f,
-	.pole_pairs = 1U,
-};
 static struct motor_algo_dc_current_data algo_data = {
-	.current_loop =
+	MOTOR_ALGO_DC_CURRENT_BASE_INITIALIZER
+	.pi =
 		{
 			.kp = 0.5f,
 			.ki = 2000.0f,
 			.out_min = -1.0f,
 			.out_max = 1.0f,
 		},
+	.limits =
+		{
+			.i_max_a = 5.0f,
+			.speed_max_rad_s = 100.0f,
+			.vbus_derating_start = 0.0f,
+			.temp_derating_start = 0.0f,
+			.temp_fault = 150.0f,
+		},
+	.timing = {.control_loop_dt_s = 1.0f / 20000.0f},
+	.kt_nm_per_a = 0.05f,
+	.pole_pairs = 1U,
+};
+static struct motor_block *const pipeline_blocks[] = { &algo_data.base };
+static struct motor_pipeline pipeline_pl = {
+	.name = "pipe_test",
+	.blocks = pipeline_blocks,
+	.n_blocks = 1,
 };
 
 MOTOR_TEST_FAKE_DEFINE(pipeline_motor);
@@ -49,12 +64,11 @@ ZTEST(motor_pipeline_suite, test_inner_step_reaches_actuator)
 	zassert_true(device_is_ready(sens), NULL);
 	zassert_true(device_is_ready(act), NULL);
 
-	m = motor_init(&ctrl, sens, act, &motor_algo_dc_current, &algo_data, &pipeline_params);
-	zassert_not_null(m, NULL);
+	zassert_equal(motor_ctrl_init(&ctrl, sens, act, &pipeline_pl, &algo_data, 20000U), 0, NULL);
+	m = &ctrl;
 
 	zassert_equal(motor_enable(m), 0, NULL);
 
-	/* torque_nm / kt_nm_per_a = i_torque_a; kt = 0.05 -> 0.01 N.m -> 0.2 A */
 	zassert_equal(motor_set_torque(m, 0.01f), 0, NULL);
 
 	motor_actuator_invoke_control_callback(act);
@@ -62,7 +76,6 @@ ZTEST(motor_pipeline_suite, test_inner_step_reaches_actuator)
 	zassert_true(pipeline_motor.has_last_cmd, NULL);
 	zassert_equal(pipeline_motor.last_cmd.kind, MOTOR_ACTUATOR_CMD_ALPHA_BETA, NULL);
 	zassert_within(pipeline_motor.last_cmd.u.ab.vbeta, 0.0f, 1e-5f, NULL);
-	/* i_torque_a=0.2, ia=0 -> first PI step valpha ~= 0.12 */
 	zassert_within(pipeline_motor.last_cmd.u.ab.valpha, 0.12f, 0.02f, NULL);
 
 	motor_estop(m);

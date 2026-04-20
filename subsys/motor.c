@@ -7,29 +7,12 @@
 #include <errno.h>
 
 #include <zephyr/drivers/motor/motor_actuator.h>
+#include <zephyr/drivers/motor/motor_sensor.h>
+#include <zephyr/subsys/motor/algorithms/dc_current/motor_algo_dc_current.h>
 #include <zephyr/subsys/motor/motor_controller.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/kernel.h>
-#include <zephyr/sys/atomic.h>
 #include <zephyr/subsys/motor/motor.h>
-
-motor_t motor_init(struct motor_ctrl *ctrl, const struct device *sensor,
-		   const struct device *actuator, const struct motor_algo_ops *algo, void *algo_data,
-		   const struct motor_ctrl_params *params)
-{
-	int err;
-
-	if (params == NULL) {
-		return NULL;
-	}
-
-	err = motor_ctrl_init(ctrl, sensor, actuator, algo, algo_data, params);
-	if (err != 0) {
-		return NULL;
-	}
-
-	return ctrl;
-}
 
 void motor_register_callbacks(motor_t motor, motor_state_cb_t state_cb,
 			      motor_fault_notify_cb_t fault_cb, void *user_data)
@@ -81,6 +64,8 @@ void motor_estop(motor_t motor)
 
 int motor_set_torque(motor_t motor, float torque_nm)
 {
+	struct motor_algo_dc_current_data *dc;
+
 	if (motor == NULL) {
 		return -EINVAL;
 	}
@@ -89,13 +74,18 @@ int motor_set_torque(motor_t motor, float torque_nm)
 		return -EINVAL;
 	}
 
-	if (motor->params.kt_nm_per_a <= 1e-9f) {
+	dc = motor->pipeline_ctx;
+	if (dc == NULL) {
+		return -EINVAL;
+	}
+
+	if (dc->kt_nm_per_a <= 1e-9f) {
 		return -EINVAL;
 	}
 
 	k_mutex_lock(&motor->lock, K_FOREVER);
 	motor->mode = MOTOR_MODE_CURRENT;
-	motor->setpoints.i_torque_a = torque_nm / motor->params.kt_nm_per_a;
+	motor->setpoints.i_torque_a = torque_nm / dc->kt_nm_per_a;
 	k_mutex_unlock(&motor->lock);
 
 	return 0;
@@ -110,15 +100,6 @@ int motor_set_drive_mode(motor_t motor, enum motor_drive_mode mode)
 	return motor_actuator_set_drive_mode(motor->actuator, mode);
 }
 
-int motor_set_params(motor_t motor, const struct motor_ctrl_params *params)
-{
-	if (motor == NULL) {
-		return -EINVAL;
-	}
-
-	return motor_ctrl_set_params(motor, params);
-}
-
 void motor_get_status(motor_t motor, enum motor_state *state, uint32_t *faults,
 		      struct motor_sensor_output *sense)
 {
@@ -127,9 +108,7 @@ void motor_get_status(motor_t motor, enum motor_state *state, uint32_t *faults,
 	}
 
 	if (sense != NULL) {
-		uint8_t idx = (uint8_t)atomic_get(&motor->sense_buf_idx);
-
-		*sense = motor->sense_buf[idx];
+		(void)motor_sensor_get(motor->sensor, sense);
 	}
 
 	motor_ctrl_get_status(motor, state, faults);

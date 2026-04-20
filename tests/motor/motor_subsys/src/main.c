@@ -6,7 +6,9 @@
 
 #include <zephyr/device.h>
 #include <zephyr/subsys/motor/motor.h>
-#include <zephyr/subsys/motor/motor_algo_dc_current.h>
+#include <zephyr/subsys/motor/motor_controller.h>
+#include <zephyr/subsys/motor/motor_ctrl_priv.h>
+#include <zephyr/subsys/motor/algorithms/dc_current/motor_algo_dc_current.h>
 #include <zephyr/subsys/motor/motor_subsys.h>
 #include <zephyr/ztest.h>
 
@@ -18,27 +20,54 @@ MOTOR_TEST_FAKE_DEFINE(motor_b);
 static struct motor_ctrl ctrl_a;
 static struct motor_ctrl ctrl_b;
 static struct motor_algo_dc_current_data algo_a = {
-	.current_loop = {
+	MOTOR_ALGO_DC_CURRENT_BASE_INITIALIZER
+	.pi = {
 		.kp = 0.5f,
 		.ki = 2000.0f,
 		.out_min = -1.0f,
 		.out_max = 1.0f,
 	},
-};
-static struct motor_algo_dc_current_data algo_b = {
-	.current_loop = {
-		.kp = 0.5f,
-		.ki = 2000.0f,
-		.out_min = -1.0f,
-		.out_max = 1.0f,
+	.limits = {
+		.i_max_a = 5.0f,
+		.speed_max_rad_s = 100.0f,
+		.vbus_derating_start = 0.0f,
+		.temp_derating_start = 0.0f,
+		.temp_fault = 150.0f,
 	},
-};
-
-static const struct motor_ctrl_params test_params = {
-	.limits = {.i_max_a = 5.0f},
 	.timing = {.control_loop_dt_s = 1.0f / 20000.0f},
 	.kt_nm_per_a = 0.05f,
 	.pole_pairs = 1U,
+};
+static struct motor_algo_dc_current_data algo_b = {
+	MOTOR_ALGO_DC_CURRENT_BASE_INITIALIZER
+	.pi = {
+		.kp = 0.5f,
+		.ki = 2000.0f,
+		.out_min = -1.0f,
+		.out_max = 1.0f,
+	},
+	.limits = {
+		.i_max_a = 5.0f,
+		.speed_max_rad_s = 100.0f,
+		.vbus_derating_start = 0.0f,
+		.temp_derating_start = 0.0f,
+		.temp_fault = 150.0f,
+	},
+	.timing = {.control_loop_dt_s = 1.0f / 20000.0f},
+	.kt_nm_per_a = 0.05f,
+	.pole_pairs = 1U,
+};
+static struct motor_block *const blocks_a[] = { &algo_a.base };
+static struct motor_block *const blocks_b[] = { &algo_b.base };
+static struct motor_pipeline pl_a = {
+	.name = "subsys_a",
+	.blocks = blocks_a,
+	.n_blocks = 1,
+};
+static struct motor_pipeline pl_b = {
+	.name = "subsys_b",
+	.blocks = blocks_b,
+	.n_blocks = 1,
 };
 
 static motor_t make_motor_a(void)
@@ -46,8 +75,10 @@ static motor_t make_motor_a(void)
 	motor_a.sense.hot.i_phase[0] = 0.0f;
 	motor_a.sense.hot.valid_current = true;
 
-	return motor_init(&ctrl_a, DEVICE_GET(motor_a_sensor), DEVICE_GET(motor_a_actuator),
-			  &motor_algo_dc_current, &algo_a, &test_params);
+	zassert_equal(motor_ctrl_init(&ctrl_a, DEVICE_GET(motor_a_sensor), DEVICE_GET(motor_a_actuator),
+				    &pl_a, &algo_a, 20000U),
+		      0);
+	return &ctrl_a;
 }
 
 static motor_t make_motor_b(void)
@@ -55,8 +86,10 @@ static motor_t make_motor_b(void)
 	motor_b.sense.hot.i_phase[0] = 0.0f;
 	motor_b.sense.hot.valid_current = true;
 
-	return motor_init(&ctrl_b, DEVICE_GET(motor_b_sensor), DEVICE_GET(motor_b_actuator),
-			  &motor_algo_dc_current, &algo_b, &test_params);
+	zassert_equal(motor_ctrl_init(&ctrl_b, DEVICE_GET(motor_b_sensor), DEVICE_GET(motor_b_actuator),
+				    &pl_b, &algo_b, 20000U),
+		      0);
+	return &ctrl_b;
 }
 
 MOTOR_GROUP_DEFINE(g_null, "g_null");

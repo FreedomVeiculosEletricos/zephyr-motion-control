@@ -9,31 +9,38 @@
 
 /**
  * @file motor_dt.h
- * @brief Compile-time extraction of motor-controller parameters from Devicetree.
+ * @brief Devicetree static initializers for algorithm instance data.
  *
- * Values are taken from a `zephyr,motor-controller` node using Zephyr @c DT_PROP
- * macros — they must be used with a **constant** node identifier (e.g.
- * @c DT_NODELABEL(motor_brushed)). There is no runtime DT walk.
- *
- * Used internally by @ref MOTOR_SUBSYS_DEFINE_DT; applications should not
- * need these macros unless declaring a custom registration path.
+ * Values are taken from a `zephyr,motor-controller` node using @c DT_PROP.
+ * Used by @ref MOTOR_SUBSYS_DEFINE_DT. No shell layer — limits/timing/kt live in
+ * the algorithm struct (here: @ref motor_algo_dc_current_data).
  */
 
 #include <zephyr/devicetree.h>
-#include <zephyr/subsys/motor/motor_controller.h>
-#include <zephyr/subsys/motor/motor_algo_dc_current.h>
+#include <zephyr/subsys/motor/algorithms/dc_current/motor_algo_dc_current.h>
 
 /** @internal 2π/60 — RPM to rad/s */
 #define MOTOR_DT_RPM_TO_RADS (0.10471975512f)
 
 /**
- * @brief Static initializer for @ref motor_ctrl_params from a motor-controller node.
+ * @brief Static initializer for @ref motor_algo_dc_current_data from a motor-controller node.
  *
- * @param node_id Devicetree node identifier (e.g. @c DT_NODELABEL(motor0)).
+ * Inner-loop gains, limits, timing, kt, and pole pairs come from DT — the sole
+ * source for the DC current pipeline instance.
+ *
+ * @param node_id Devicetree node identifier (e.g. @c DT_NODELABEL(motor_brushed)).
  */
-#define MOTOR_CTRL_PARAMS_INITIALIZER(node_id)                                                   \
+#define MOTOR_DC_CURRENT_DATA_INITIALIZER(node_id)                                                \
 	{                                                                                          \
-		.limits =                                                                          \
+		MOTOR_ALGO_DC_CURRENT_BASE_INITIALIZER                                               \
+		.i_integral = 0.0f,                                                              \
+		.pi = {                                                                            \
+			.kp = (float)DT_PROP(node_id, dc_current_kp_milli) / 1000.0f,            \
+			.ki = (float)DT_PROP(node_id, dc_current_ki_milli) / 1000.0f,            \
+			.out_min = (float)DT_PROP(node_id, dc_current_out_min_milli) / 1000.0f,  \
+			.out_max = (float)DT_PROP(node_id, dc_current_out_max_milli) / 1000.0f,  \
+		},                                                                                 \
+		.limits =                                                                           \
 			{                                                                          \
 				.i_max_a = (float)DT_PROP(node_id, i_max_ma) / 1000.0f,            \
 				.speed_max_rad_s = (float)DT_PROP(node_id, speed_max_rpm) *          \
@@ -51,29 +58,6 @@
 			},                                                                         \
 		.kt_nm_per_a = (float)DT_PROP(node_id, dc_kt_mnm_per_a) / 1000.0f,                  \
 		.pole_pairs = (uint8_t)DT_PROP(node_id, pole_pairs),                             \
-		.speed_loop = {0},                                                                 \
-		.accel = {0},                                                                      \
-		.kp_pos = 0.0f,                                                                    \
-		.kd_pos = 0.0f,                                                                    \
-	}
-
-/**
- * @brief Static initializer for @ref motor_algo_dc_current_data from a motor-controller node.
- *
- * Inner-loop gains come from optional DT properties (milli-scaled); limits/timing/kt are
- * refreshed in @ref motor_algo_dc_current init from @ref motor_ctrl_params.
- *
- * @param node_id Devicetree node identifier for the @c zephyr,motor-controller instance.
- */
-#define MOTOR_DC_CURRENT_DATA_INITIALIZER(node_id)                                                \
-	{                                                                                          \
-		.i_integral = 0.0f,                                                              \
-		.current_loop = {                                                                  \
-			.kp = (float)DT_PROP(node_id, dc_current_kp_milli) / 1000.0f,            \
-			.ki = (float)DT_PROP(node_id, dc_current_ki_milli) / 1000.0f,            \
-			.out_min = (float)DT_PROP(node_id, dc_current_out_min_milli) / 1000.0f,  \
-			.out_max = (float)DT_PROP(node_id, dc_current_out_max_milli) / 1000.0f,  \
-		},                                                                                 \
 	}
 
 #endif /* ZEPHYR_INCLUDE_SUBSYS_MOTOR_MOTOR_DT_H_ */

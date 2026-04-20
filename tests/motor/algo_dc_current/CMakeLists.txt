@@ -7,5 +7,6 @@ project(motor_algo_dc_current_test)
 
 set(MOTOR_MODULE ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
 
-target_sources(app PRIVATE src/main.c ${MOTOR_MODULE}/subsys/motor_algo_dc_current.c)
+target_sources(app PRIVATE src/main.c
+			     ${MOTOR_MODULE}/subsys/motor/algorithms/dc_current/motor_algo_dc_current.c)
 target_include_directories(app PRIVATE ${MOTOR_MODULE}/include)

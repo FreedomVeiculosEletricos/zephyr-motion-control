@@ -128,13 +128,8 @@ enum motor_accel_profile {
  * The base rate for INNER_ISR is set by the actuator driver (PWM ISR rate);
  * outer / supervision base rates are set by their respective threads.
  *
- * Today the controller implements three slots (inner, outer_0, outer_1) plus a
- * future supervision rate. This enum is the contract for the upcoming N-block
- * pipeline; the 3-slot vtable maps as:
- *
- *   motor_algo_ops.inner_step    -> MOTOR_STAGE_INNER_ISR
- *   motor_algo_ops.outer_step_0  -> MOTOR_STAGE_OUTER_FAST
- *   motor_algo_ops.outer_step_1  -> MOTOR_STAGE_OUTER_SLOW
+ * The controller maintains one tick counter per stage; each @ref motor_block
+ * selects a stage and @c period_div for scheduling.
  */
 enum motor_pipeline_stage {
 	MOTOR_STAGE_INNER_ISR = 0,
@@ -147,7 +142,7 @@ enum motor_pipeline_stage {
 struct motor_ctrl;
 
 /**
- * @brief Opaque motor handle returned by motor_init().
+ * @brief Opaque motor handle (@c struct motor_ctrl *) from @ref motor_subsys_get_by_label.
  *
  * The application holds this pointer and passes it to all motor_*()
  * calls. Internal structure is not part of the public API.

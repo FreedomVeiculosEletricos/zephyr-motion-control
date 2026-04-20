@@ -17,6 +17,7 @@
 #include <zephyr/sys/util.h>
 
 #include <zephyr/subsys/motor/motor.h>
+#include <zephyr/subsys/motor/motor_ctrl_priv.h>
 #include <zephyr/subsys/motor/motor_subsys.h>
 
 static motor_t instances[CONFIG_MOTOR_MAX_INSTANCES];
@@ -193,19 +194,19 @@ int motor_subsys_init(void)
 	}
 
 	STRUCT_SECTION_FOREACH(motor_subsys_entry, entry) {
-		motor_t m;
+		int err;
 
 		if (i >= CONFIG_MOTOR_MAX_INSTANCES) {
 			return -ENOMEM;
 		}
 
-		m = motor_init(entry->ctrl, entry->sensor, entry->actuator, entry->algo, entry->algo_data,
-			       entry->params);
-		if (m == NULL) {
-			return -EIO;
+		err = motor_ctrl_init(entry->ctrl, entry->sensor, entry->actuator, entry->pipeline,
+				      entry->pipeline_ctx, entry->inner_rate_hz);
+		if (err != 0) {
+			return err;
 		}
 
-		instances[i] = m;
+		instances[i] = entry->ctrl;
 		i++;
 	}
 

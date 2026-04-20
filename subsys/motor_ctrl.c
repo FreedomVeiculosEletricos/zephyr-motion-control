@@ -8,80 +8,54 @@
 #include <string.h>
 
 #include <zephyr/drivers/motor/motor_actuator.h>
+#include <zephyr/subsys/motor/motor_ctrl_priv.h>
 #include <zephyr/subsys/motor/motor_controller.h>
+#include <zephyr/subsys/motor/motor_pipeline.h>
 #include <zephyr/drivers/motor/motor_sensor.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 
 /*
- * motor_ctrl is the scheduling shell. It must stay algorithm-agnostic so a new
- * algorithm or the upcoming N-block pipeline can plug in without touching this
- * file. Do not include any concrete algorithm header (e.g. motor_algo_dc_current.h)
- * or hard-code algorithm-specific behaviour here — go through the motor_algo_ops
- * vtable only.
+ * motor_ctrl is the scheduling shell. Dispatch goes through
+ * @ref motor_pipeline_run_stage only.
  */
 
 static void motor_ctrl_current_isr(const struct device *actuator, void *user_data);
 
-/*
- * Single dispatch point for one inner_step ISR pass: build the IO bus, run the
- * algorithm and forward the resulting actuator command. When the N-block
- * pipeline lands, only this helper changes (it iterates blocks at INNER_ISR).
- */
 static void motor_ctrl_run_inner(struct motor_ctrl *ctrl, const struct motor_sensor_output *sense,
 				 struct motor_actuator_cmd *cmd)
 {
 	struct motor_block_in in = {
 		.sense = sense,
 		.sp = &ctrl->setpoints,
-		.algo = ctrl->algo_data,
+		.algo = ctrl->pipeline_ctx,
 	};
 	struct motor_block_out out = {
 		.sp = &ctrl->setpoints,
 		.cmd = cmd,
 	};
 
-	ctrl->algo->inner_step(ctrl->algo_data, &in, &out);
+	motor_pipeline_run_stage(ctrl->pipeline, ctrl->pipeline_ctx, MOTOR_STAGE_INNER_ISR,
+				 ctrl->stage_tick[MOTOR_STAGE_INNER_ISR], &in, &out);
 }
 
 #if IS_ENABLED(CONFIG_MOTOR_CTRL_OUTER_LOOPS)
-/*
- * Single dispatch point for one outer pass at the requested stage. The vtable
- * still has fixed slots (outer_step_0 / outer_step_1) so the caller passes the
- * stage and we route to the matching slot, applying the algo-supplied period_div.
- */
 static void motor_ctrl_run_outer(struct motor_ctrl *ctrl, enum motor_pipeline_stage stage,
 				 const struct motor_sensor_output *sense)
 {
 	struct motor_block_in in = {
 		.sense = sense,
 		.sp = &ctrl->setpoints,
-		.algo = ctrl->algo_data,
+		.algo = ctrl->pipeline_ctx,
 	};
 	struct motor_block_out out = {
 		.sp = &ctrl->setpoints,
 		.cmd = NULL,
 	};
-	void (*step)(void *, const struct motor_block_in *, struct motor_block_out *) = NULL;
-	uint16_t div = 1U;
 
-	switch (stage) {
-	case MOTOR_STAGE_OUTER_FAST:
-		step = ctrl->algo->outer_step_0;
-		div = ctrl->algo->outer_0_div ? ctrl->algo->outer_0_div : 1U;
-		break;
-	case MOTOR_STAGE_OUTER_SLOW:
-		step = ctrl->algo->outer_step_1;
-		div = ctrl->algo->outer_1_div ? ctrl->algo->outer_1_div : 1U;
-		break;
-	default:
-		return;
-	}
-
-	if ((step != NULL) && ((ctrl->stage_tick[stage] % div) == 0U)) {
-		step(ctrl->algo_data, &in, &out);
-	}
+	motor_pipeline_run_stage(ctrl->pipeline, ctrl->pipeline_ctx, stage,
+				 ctrl->stage_tick[stage], &in, &out);
 }
 
 static void motor_outer_thread_fn(void *p1, void *p2, void *p3)
@@ -92,7 +66,7 @@ static void motor_outer_thread_fn(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p3);
 
 	for (;;) {
-		k_sleep(K_MSEC(1));
+		(void)k_sem_take(&ctrl->outer_wake, K_FOREVER);
 
 		if (ctrl->state != MOTOR_STATE_RUN) {
 			ctrl->stage_tick[MOTOR_STAGE_OUTER_FAST] = 0U;
@@ -102,8 +76,11 @@ static void motor_outer_thread_fn(void *p1, void *p2, void *p3)
 
 		k_mutex_lock(&ctrl->lock, K_FOREVER);
 		{
-			uint8_t idx = (uint8_t)atomic_get(&ctrl->sense_buf_idx);
-			struct motor_sensor_output sense = ctrl->sense_buf[idx];
+			struct motor_sensor_output sense;
+			k_spinlock_key_t key = k_spin_lock(&ctrl->outer_snap_lock);
+
+			sense = ctrl->outer_snap;
+			k_spin_unlock(&ctrl->outer_snap_lock, key);
 
 			motor_ctrl_run_outer(ctrl, MOTOR_STAGE_OUTER_FAST, &sense);
 			motor_ctrl_run_outer(ctrl, MOTOR_STAGE_OUTER_SLOW, &sense);
@@ -117,36 +94,41 @@ static void motor_outer_thread_fn(void *p1, void *p2, void *p3)
 #endif
 
 int motor_ctrl_init(struct motor_ctrl *ctrl, const struct device *sensor,
-		    const struct device *actuator, const struct motor_algo_ops *algo, void *algo_data,
-		    const struct motor_ctrl_params *params)
+		    const struct device *actuator, struct motor_pipeline *pipeline, void *pipeline_ctx,
+		    uint32_t inner_rate_hz)
 {
 	int err;
 
-	if ((ctrl == NULL) || (sensor == NULL) || (actuator == NULL) || (algo == NULL) ||
-	    (algo_data == NULL) || (algo->inner_step == NULL) || (params == NULL)) {
+	if ((ctrl == NULL) || (sensor == NULL) || (actuator == NULL) || (pipeline == NULL) ||
+	    (pipeline_ctx == NULL) || (inner_rate_hz == 0U) || (pipeline->n_blocks == 0U)) {
 		return -EINVAL;
 	}
 
 	memset(ctrl, 0, sizeof(*ctrl));
 
-	memcpy(&ctrl->params, params, sizeof(ctrl->params));
-
 	ctrl->sensor = sensor;
 	ctrl->actuator = actuator;
-	ctrl->algo = algo;
-	ctrl->algo_data = algo_data;
+	ctrl->pipeline = pipeline;
+	ctrl->pipeline_ctx = pipeline_ctx;
 	ctrl->state = MOTOR_STATE_IDLE;
 	ctrl->mode = MOTOR_MODE_CURRENT;
-	ctrl->inner_rate_hz =
-		(uint32_t)(1.0f / ctrl->params.timing.control_loop_dt_s);
+	ctrl->inner_rate_hz = inner_rate_hz;
 	k_mutex_init(&ctrl->lock);
 
-	err = motor_sensor_init(sensor, NULL);
-	if (err != 0) {
-		return err;
-	}
+#if IS_ENABLED(CONFIG_MOTOR_CTRL_OUTER_LOOPS)
+	{
+		uint32_t t = (uint32_t)CONFIG_MOTOR_CTRL_OUTER_TARGET_HZ;
 
-	err = algo->init(algo_data, &ctrl->params);
+		ctrl->outer_decim = (inner_rate_hz + t - 1U) / t;
+		if (ctrl->outer_decim == 0U) {
+			ctrl->outer_decim = 1U;
+		}
+		ctrl->outer_isr_phase = 0U;
+		k_sem_init(&ctrl->outer_wake, 0, K_SEM_MAX_LIMIT);
+	}
+#endif
+
+	err = motor_pipeline_init(pipeline, pipeline_ctx);
 	if (err != 0) {
 		return err;
 	}
@@ -176,10 +158,20 @@ static void motor_ctrl_current_isr(const struct device *actuator, void *user_dat
 	(void)motor_sensor_update(ctrl->sensor);
 	(void)motor_sensor_get(ctrl->sensor, &sense);
 
-	uint8_t new_idx = (uint8_t)((uint32_t)atomic_get(&ctrl->sense_buf_idx) ^ 1U);
+#if IS_ENABLED(CONFIG_MOTOR_CTRL_OUTER_LOOPS)
+	{
+		k_spinlock_key_t key = k_spin_lock(&ctrl->outer_snap_lock);
 
-	ctrl->sense_buf[new_idx] = sense;
-	atomic_set(&ctrl->sense_buf_idx, (atomic_val_t)new_idx);
+		ctrl->outer_snap = sense;
+		k_spin_unlock(&ctrl->outer_snap_lock, key);
+
+		ctrl->outer_isr_phase++;
+		if (ctrl->outer_isr_phase >= ctrl->outer_decim) {
+			ctrl->outer_isr_phase = 0U;
+			k_sem_give(&ctrl->outer_wake);
+		}
+	}
+#endif
 
 	motor_ctrl_run_inner(ctrl, &sense, &cmd);
 	(void)motor_actuator_set_command(actuator, &cmd);
@@ -228,6 +220,7 @@ int motor_ctrl_enable(struct motor_ctrl *ctrl)
 	if (err == 0) {
 		ctrl->state = MOTOR_STATE_RUN;
 #if IS_ENABLED(CONFIG_MOTOR_CTRL_OUTER_LOOPS)
+		ctrl->outer_isr_phase = 0U;
 		if (!ctrl->outer_thread_started) {
 			k_thread_create(&ctrl->outer_thread, ctrl->outer_stack_mem,
 					K_KERNEL_STACK_SIZEOF(ctrl->outer_stack_mem), motor_outer_thread_fn,
@@ -252,12 +245,16 @@ int motor_ctrl_disable(struct motor_ctrl *ctrl)
 
 	k_mutex_lock(&ctrl->lock, K_FOREVER);
 	(void)motor_actuator_disable(ctrl->actuator);
-	ctrl->algo->reset(ctrl->algo_data);
+	motor_pipeline_reset(ctrl->pipeline, ctrl->pipeline_ctx);
 	ctrl->state = MOTOR_STATE_IDLE;
 	if (ctrl->app_state_cb != NULL) {
 		ctrl->app_state_cb(ctrl, MOTOR_STATE_IDLE, ctrl->app_cb_data);
 	}
 	k_mutex_unlock(&ctrl->lock);
+
+#if IS_ENABLED(CONFIG_MOTOR_CTRL_OUTER_LOOPS)
+	k_sem_give(&ctrl->outer_wake);
+#endif
 
 	return 0;
 }
@@ -269,8 +266,12 @@ void motor_ctrl_estop(struct motor_ctrl *ctrl)
 	}
 
 	(void)motor_actuator_disable(ctrl->actuator);
-	ctrl->algo->reset(ctrl->algo_data);
+	motor_pipeline_reset(ctrl->pipeline, ctrl->pipeline_ctx);
 	ctrl->state = MOTOR_STATE_IDLE;
+
+#if IS_ENABLED(CONFIG_MOTOR_CTRL_OUTER_LOOPS)
+	k_sem_give(&ctrl->outer_wake);
+#endif
 }
 
 int motor_ctrl_clear_fault(struct motor_ctrl *ctrl)
@@ -281,22 +282,6 @@ int motor_ctrl_clear_fault(struct motor_ctrl *ctrl)
 
 	ctrl->fault_flags = 0U;
 	ctrl->state = MOTOR_STATE_IDLE;
-	return 0;
-}
-
-int motor_ctrl_set_params(struct motor_ctrl *ctrl, const struct motor_ctrl_params *params)
-{
-	if ((ctrl == NULL) || (params == NULL)) {
-		return -EINVAL;
-	}
-
-	k_mutex_lock(&ctrl->lock, K_FOREVER);
-	memcpy(&ctrl->params, params, sizeof(*params));
-	ctrl->algo->set_params(ctrl->algo_data, params);
-	ctrl->inner_rate_hz =
-		(uint32_t)(1.0f / ctrl->params.timing.control_loop_dt_s);
-	k_mutex_unlock(&ctrl->lock);
-
 	return 0;
 }
 

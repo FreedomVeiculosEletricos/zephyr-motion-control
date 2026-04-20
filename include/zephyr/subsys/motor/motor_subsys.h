@@ -9,6 +9,7 @@
 
 #include <zephyr/subsys/motor/motor.h>
 #include <zephyr/subsys/motor/motor_dt.h>
+#include <zephyr/subsys/motor/motor_pipeline.h>
 #include <zephyr/device.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
@@ -51,6 +52,10 @@ extern "C" {
  *   7. Shared resource arbitration — if two motor instances share
  *      an ADC or timer peripheral, the subsystem serialises their
  *      update() calls using a per-resource spinlock.
+ *
+ *   8. Per-algorithm tuning — predefined pipelines (dc-current, future FOC, …)
+ *      expose settable parameters in their own headers; @ref motor.h stays
+ *      limited to generic motor commands and this subsystem to discovery and groups.
  *
  * Quadrotor usage sketch:
  *
@@ -115,17 +120,14 @@ struct motor_subsys_entry {
 	/** Power stage backend device (from DT actuator phandle). */
 	const struct device *actuator;
 
-	/** Algorithm vtable pointer (resolved from DT algorithm property). */
-	const struct motor_algo_ops *algo;
+	/** Pipeline descriptor (blocks + optional hooks). */
+	struct motor_pipeline *pipeline;
 
-	/** Algorithm private state buffer. */
-	void *algo_data;
+	/** Opaque root passed as @ref motor_block_in::algo. */
+	void *pipeline_ctx;
 
-	/**
-	 * Initial parameters — from @ref MOTOR_SUBSYS_DEFINE_DT (Devicetree) or
-	 * supplied explicitly; must not be NULL.
-	 */
-	const struct motor_ctrl_params *params;
+	/** Inner-loop ISR rate in Hz (e.g. @c current_loop_rate_hz from DT). */
+	uint32_t inner_rate_hz;
 
 	/** DT node identifier string (e.g. "motor0") — for shell/debug. */
 	const char *label;
@@ -141,56 +143,67 @@ struct motor_subsys_entry {
  * @param _ctrl      Storage: struct motor_ctrl instance (from MOTOR_CTRL_DEFINE).
  * @param _sensor    Sensor backend device pointer.
  * @param _actuator  Power stage backend device pointer.
- * @param _algo      Algorithm vtable pointer.
- * @param _algo_data Algorithm private state pointer.
- * @param _params    Pointer to @ref motor_ctrl_params (required).
- * @param _label     DT label string.
+ * @param _pipeline     Pipeline descriptor.
+ * @param _pipeline_ctx Opaque algorithm root (same storage rules as @c motor_ctrl).
+ * @param _inner_hz     Inner-loop ISR rate in Hz.
+ * @param _label        DT label string.
  */
-#define MOTOR_SUBSYS_DEFINE(_name, _ctrl, _sensor, _actuator, _algo, _algo_data, _params, _label)  \
+#define MOTOR_SUBSYS_DEFINE(_name, _ctrl, _sensor, _actuator, _pipeline, _pipeline_ctx,            \
+			    _inner_hz, _label)                                                 \
 	static STRUCT_SECTION_ITERABLE(motor_subsys_entry, _name) = {                              \
 		.ctrl = (_ctrl),                                                                   \
 		.sensor = (_sensor),                                                               \
 		.actuator = (_actuator),                                                           \
-		.algo = (_algo),                                                                   \
-		.algo_data = (_algo_data),                                                         \
-		.params = (_params),                                                               \
+		.pipeline = (_pipeline),                                                           \
+		.pipeline_ctx = (_pipeline_ctx),                                                   \
+		.inner_rate_hz = (_inner_hz),                                                      \
 		.label = (_label),                                                                 \
 	}
 
 /**
- * @brief Register a motor-controller instance from Devicetree (dc-current algorithm).
+ * @brief Register a motor-controller instance from Devicetree (dc-current pipeline).
  *
- * Expands @ref motor_ctrl_params and @ref motor_algo_dc_current_data from the
- * `zephyr,motor-controller` node using @ref MOTOR_CTRL_PARAMS_INITIALIZER and
- * @ref MOTOR_DC_CURRENT_DATA_INITIALIZER — no application-side parameter structs.
+ * Expands @ref motor_algo_dc_current_data from the `zephyr,motor-controller` node using
+ * @ref MOTOR_DC_CURRENT_DATA_INITIALIZER.
  *
  * @param _nodelabel  DT node label (unquoted), e.g. motor_brushed.
  * @param _ctrl       Pre-declared @ref motor_ctrl instance (MOTOR_CTRL_DEFINE).
  */
 #define MOTOR_SUBSYS_DEFINE_DT(_nodelabel, _ctrl)                                                  \
-	static const struct motor_ctrl_params UTIL_CAT(_motor_params_, _nodelabel) =                \
-		MOTOR_CTRL_PARAMS_INITIALIZER(DT_NODELABEL(_nodelabel));                             \
-	static struct motor_algo_dc_current_data UTIL_CAT(_motor_dc_, _nodelabel) =                   \
-		MOTOR_DC_CURRENT_DATA_INITIALIZER(DT_NODELABEL(_nodelabel));                           \
+	static struct motor_algo_dc_current_data UTIL_CAT(_motor_dc_, _nodelabel) =                  \
+		MOTOR_DC_CURRENT_DATA_INITIALIZER(DT_NODELABEL(_nodelabel));                        \
+	static struct motor_block *const UTIL_CAT(_motor_dc_blocks_, _nodelabel)[] = {              \
+		&UTIL_CAT(_motor_dc_, _nodelabel).base,                                              \
+	};                                                                                         \
+	static struct motor_pipeline UTIL_CAT(_motor_pl_, _nodelabel) = {                           \
+		.name = "dc_current",                                                               \
+		.blocks = UTIL_CAT(_motor_dc_blocks_, _nodelabel),                                   \
+		.n_blocks = 1,                                                                       \
+		.init = NULL,                                                                        \
+		.reset = NULL,                                                                       \
+		.set_params = NULL,                                                                  \
+	};                                                                                         \
 	MOTOR_SUBSYS_DEFINE(motor_entry_##_nodelabel, (_ctrl),                                     \
 			    DEVICE_DT_GET(DT_PHANDLE(DT_NODELABEL(_nodelabel), sensor)),           \
 			    DEVICE_DT_GET(DT_PHANDLE(DT_NODELABEL(_nodelabel), actuator)),         \
-			    &motor_algo_dc_current, &UTIL_CAT(_motor_dc_, _nodelabel),                 \
-			    &UTIL_CAT(_motor_params_, _nodelabel), STRINGIFY(_nodelabel))
+			    &UTIL_CAT(_motor_pl_, _nodelabel), &UTIL_CAT(_motor_dc_, _nodelabel),    \
+			    DT_PROP(DT_NODELABEL(_nodelabel), current_loop_rate_hz),                 \
+			    STRINGIFY(_nodelabel))
 
 /* ------------------------------------------------------------------ */
 /* Subsystem init and instance discovery                               */
 /* ------------------------------------------------------------------ */
 
 /**
- * @brief Initialise the motor subsystem.
+ * @brief Bootstrap all motors declared with @c MOTOR_SUBSYS_DEFINE / @c MOTOR_SUBSYS_DEFINE_DT.
  *
- * Walks all MOTOR_SUBSYS_DEFINE entries in the iterable section,
- * calls motor_init() for each, and makes them discoverable.
+ * Single entry point for the module: walks the iterable section, wires sensor,
+ * actuator, pipeline, and algorithm storage (Devicetree + static data), then
+ * exposes handles via @ref motor_subsys_get_by_label.
  *
- * Called automatically by SYS_INIT() at APPLICATION level if
- * CONFIG_MOTOR_SUBSYS_AUTO_INIT=y (default).
- * May also be called explicitly before use.
+ * With @c CONFIG_MOTOR_SUBSYS_AUTO_INIT=y (default), Zephyr runs this from
+ * @c SYS_INIT(APPLICATION, …) — applications do not call it. Use an explicit
+ * call only for tests or a custom init order when auto-init is disabled.
  *
  * @retval 0 All instances initialised.
  * @retval negative errno if any instance fails to init.
