@@ -16,10 +16,10 @@ description: |
   time, so no manual device lookup is needed in application code.
 
   Motor physical constants (Rs, Ld, Lq, flux-linkage, pole-pairs) and
-  shell limits (current, speed, rates) come from this node. DC inner-loop
+  operating limits (current, speed, rates) come from this node. DC inner-loop
   gains may be set via optional dc-current-*-milli properties; the
   subsystem expands them at build time — applications do not construct
-  motor_ctrl_params manually for DT-driven motors.
+  shell config manually for DT-driven motors.
 
 compatible: "zephyr,motor-controller"
 
@@ -197,7 +197,7 @@ properties:
   settings-key:
     type: string
     description: |
-      Base key under which motor_ctrl_params are persisted via the
+      Base key under which shell/algorithm settings are persisted via the
       Zephyr settings subsystem. Defaults to the DT node label string
       if not specified (e.g. "motor0").
       Example: settings-key = "drive/axis0";

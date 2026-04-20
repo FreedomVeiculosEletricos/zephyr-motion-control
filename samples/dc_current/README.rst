@@ -21,9 +21,9 @@ stage drivers are SoC-specific (e.g. ``zephyr,motor-sensor-encoder-stm32``,
 The application uses the **motor subsystem** API: devicetree declares a
 ``zephyr,motor-controller`` node (label ``motor_brushed``) that references the sensor
 and actuator; the sample registers the instance with ``MOTOR_SUBSYS_DEFINE_DT()`` and
-obtains a ``motor_t`` via ``motor_subsys_get_by_label("motor_brushed")``. Runtime PI
-gains and limits stay in ``struct motor_ctrl_params`` in ``main.c`` (must stay consistent
-with the DT node, e.g. ``dc-kt-mnm-per-a`` for the torque constant).
+obtains a ``motor_t`` via ``motor_subsys_get_by_label("motor_brushed")``. PI gains,
+shell limits/timing, and other fields are expanded from Devicetree (e.g.
+``dc-kt-mnm-per-a`` for the torque constant).
 
 For a **dedicated full-bridge** sample (two half-bridge legs, same algorithm), see
 :file:`../dc_current_full_bridge/README.rst`.

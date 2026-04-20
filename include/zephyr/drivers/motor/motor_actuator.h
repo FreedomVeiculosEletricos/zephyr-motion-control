@@ -96,7 +96,8 @@ enum motor_actuator_cmd_kind {
 /**
  * @brief Unified actuator command (enum + union, no indirection).
  *
- * Produced by @ref motor_algo_ops.inner_step and consumed by @ref motor_actuator_set_command.
+ * Produced by inner-stage @ref motor_block entry functions and consumed by
+ * @ref motor_actuator_set_command.
  */
 struct motor_actuator_cmd {
 	enum motor_actuator_cmd_kind kind;
