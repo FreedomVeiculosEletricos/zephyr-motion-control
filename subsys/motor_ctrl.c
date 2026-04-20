@@ -64,9 +64,9 @@ int motor_ctrl_init(struct motor_ctrl *ctrl, const struct device *sensor,
 		return -EINVAL;
 	}
 
-	(void)memset(ctrl, 0, sizeof(*ctrl));
+	memset(ctrl, 0, sizeof(*ctrl));
 
-	(void)memcpy(&ctrl->params, params, sizeof(ctrl->params));
+	memcpy(&ctrl->params, params, sizeof(ctrl->params));
 
 	ctrl->sensor = sensor;
 	ctrl->actuator = actuator;
@@ -227,7 +227,7 @@ int motor_ctrl_set_params(struct motor_ctrl *ctrl, const struct motor_ctrl_param
 	}
 
 	k_mutex_lock(&ctrl->lock, K_FOREVER);
-	(void)memcpy(&ctrl->params, params, sizeof(*params));
+	memcpy(&ctrl->params, params, sizeof(*params));
 	ctrl->algo->set_params(ctrl->algo_data, params);
 	ctrl->inner_rate_hz =
 		(uint32_t)(1.0f / ctrl->params.timing.control_loop_dt_s);

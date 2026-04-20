@@ -439,7 +439,7 @@ static int sensor_enc_esp32s3_init(const struct device *dev, const struct motor_
 {
 	struct motor_sensor_enc_esp32s3_data *data = dev->data;
 
-	(void)memset(&data->last, 0, sizeof(data->last));
+	memset(&data->last, 0, sizeof(data->last));
 	data->current_offset[0] = 0.0f;
 	data->current_offset[1] = 0.0f;
 	data->current_offset[2] = 0.0f;
