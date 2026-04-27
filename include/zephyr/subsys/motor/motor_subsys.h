@@ -235,6 +235,14 @@ motor_t motor_subsys_get_by_index(uint8_t index);
  */
 uint8_t motor_subsys_count(void);
 
+/**
+ * @brief Devicetree label string for a registered instance (e.g. shell list).
+ *
+ * @param motor  Handle from @ref motor_subsys_get_by_index / get_by_label.
+ * @return Label string, or NULL if the handle is not a registered instance.
+ */
+const char *motor_subsys_label_get(motor_t motor);
+
 /* ------------------------------------------------------------------ */
 /* Motor group                                                          */
 /* ------------------------------------------------------------------ */

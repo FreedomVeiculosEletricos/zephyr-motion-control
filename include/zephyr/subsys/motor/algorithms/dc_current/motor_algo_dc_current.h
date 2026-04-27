@@ -90,7 +90,11 @@ void motor_dc_current_block_reset(struct motor_block *self);
 int motor_algo_dc_current_set_pi_gains(motor_t motor, const struct motor_dc_current_pi *pi,
 				       bool reset_integral);
 
+int motor_algo_dc_current_get_pi_gains(motor_t motor, struct motor_dc_current_pi *out);
+
 int motor_algo_dc_current_set_limits(motor_t motor, const struct motor_dc_current_limits *limits);
+
+int motor_algo_dc_current_get_limits(motor_t motor, struct motor_dc_current_limits *out);
 
 /**
  * @}

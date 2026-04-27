@@ -104,6 +104,26 @@ int motor_algo_dc_current_set_pi_gains(motor_t motor, const struct motor_dc_curr
 	return 0;
 }
 
+int motor_algo_dc_current_get_pi_gains(motor_t motor, struct motor_dc_current_pi *out)
+{
+	struct motor_algo_dc_current_data *dc = dc_data_from_motor(motor);
+	k_spinlock_key_t key;
+
+	if (out == NULL) {
+		return -EINVAL;
+	}
+
+	if (dc == NULL) {
+		return -ENOTSUP;
+	}
+
+	key = k_spin_lock(&dc->current_pi_lock);
+	*out = dc->pi;
+	k_spin_unlock(&dc->current_pi_lock, key);
+
+	return 0;
+}
+
 int motor_algo_dc_current_set_limits(motor_t motor, const struct motor_dc_current_limits *limits)
 {
 	struct motor_algo_dc_current_data *dc = dc_data_from_motor(motor);
@@ -119,6 +139,26 @@ int motor_algo_dc_current_set_limits(motor_t motor, const struct motor_dc_curren
 
 	key = k_spin_lock(&dc->current_pi_lock);
 	dc->limits = *limits;
+	k_spin_unlock(&dc->current_pi_lock, key);
+
+	return 0;
+}
+
+int motor_algo_dc_current_get_limits(motor_t motor, struct motor_dc_current_limits *out)
+{
+	struct motor_algo_dc_current_data *dc = dc_data_from_motor(motor);
+	k_spinlock_key_t key;
+
+	if (out == NULL) {
+		return -EINVAL;
+	}
+
+	if (dc == NULL) {
+		return -ENOTSUP;
+	}
+
+	key = k_spin_lock(&dc->current_pi_lock);
+	*out = dc->limits;
 	k_spin_unlock(&dc->current_pi_lock, key);
 
 	return 0;

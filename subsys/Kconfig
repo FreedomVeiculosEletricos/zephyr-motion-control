@@ -47,6 +47,15 @@ config MOTOR_MAX_INSTANCES
 	default 8
 	range 1 32
 
+config MOTOR_CONTROL_SHELL
+	bool "Motor shell (list, use, current, enable, DC pi/limits, …)"
+	depends on SHELL
+	depends on MOTOR_SUBSYS
+	default n
+	help
+	  Register interactive ``motor`` commands for bench tuning. Requires
+	  @kconfig{CONFIG_MOTOR_SUBSYS} and a console.
+
 endif # MOTOR_SUBSYS
 
 endmenu

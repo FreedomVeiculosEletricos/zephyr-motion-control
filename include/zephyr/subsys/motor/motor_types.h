@@ -65,6 +65,7 @@ enum motor_drive_mode {
 	MOTOR_DRIVE_NORMAL = 0,
 	MOTOR_DRIVE_COAST = 1,
 	MOTOR_DRIVE_BRAKE = 2,
+	MOTOR_DRIVE_REGEN = 3,
 };
 
 /**

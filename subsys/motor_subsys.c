@@ -247,6 +247,21 @@ uint8_t motor_subsys_count(void)
 	return motor_subsys_ready ? instance_count : 0U;
 }
 
+const char *motor_subsys_label_get(motor_t motor)
+{
+	if (motor == NULL) {
+		return NULL;
+	}
+
+	STRUCT_SECTION_FOREACH(motor_subsys_entry, entry) {
+		if (entry->ctrl == motor) {
+			return entry->label;
+		}
+	}
+
+	return NULL;
+}
+
 #if IS_ENABLED(CONFIG_MOTOR_SUBSYS_AUTO_INIT)
 static int motor_subsys_auto_init(void)
 {
