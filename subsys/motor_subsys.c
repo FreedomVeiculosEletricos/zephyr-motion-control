@@ -546,18 +546,18 @@ static int group_for_each(const struct motor_group *group, motor_group_apply_fn 
 	return first_err;
 }
 
-static int apply_set_torque(motor_t m, uint8_t idx, void *ctx)
+static int apply_set_current(motor_t m, uint8_t idx, void *ctx)
 {
-	const float *torques = ctx;
+	const float *i_a = ctx;
 
-	return motor_set_torque(m, torques[idx]);
+	return motor_set_current(m, i_a[idx]);
 }
 
-int motor_group_set_torque(struct motor_group *group, const float *torques)
+int motor_group_set_current(struct motor_group *group, const float *i_a)
 {
 	int ret;
 
-	if ((group == NULL) || (torques == NULL) || (group->count == 0U)) {
+	if ((group == NULL) || (i_a == NULL) || (group->count == 0U)) {
 		return -EINVAL;
 	}
 
@@ -566,7 +566,7 @@ int motor_group_set_torque(struct motor_group *group, const float *torques)
 		return ret;
 	}
 
-	return group_for_each(group, apply_set_torque, (void *)torques);
+	return group_for_each(group, apply_set_current, (void *)i_a);
 }
 
 static int apply_set_drive_mode(motor_t m, uint8_t idx, void *ctx)

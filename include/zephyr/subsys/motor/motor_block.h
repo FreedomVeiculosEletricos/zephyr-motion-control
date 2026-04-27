@@ -22,16 +22,14 @@ extern "C" {
  *
  * Algorithms compose @c motor_block instances (each embedded in private state).
  * @ref motor_pipeline_run_stage dispatches by @c stage and @c period_div.
- * The @c .init pointer is invoked during pipeline bootstrap by the subsystem,
- * not from application code.
+ * Initial state (e.g. PI, limits) comes from static / Devicetree initializers
+ * in the algorithm implementation, not a runtime @c init hook on the block.
  */
 
 struct motor_block;
 
 typedef void (*motor_block_entry_t)(struct motor_block *self, const struct motor_block_in *in,
 				    struct motor_block_out *out);
-
-typedef int (*motor_block_init_t)(struct motor_block *self);
 
 typedef void (*motor_block_reset_t)(struct motor_block *self);
 
@@ -41,7 +39,6 @@ struct motor_block {
 	const char *name;
 	enum motor_pipeline_stage stage;
 	uint16_t period_div;
-	motor_block_init_t init;
 	motor_block_entry_t entry;
 	motor_block_reset_t reset;
 	motor_block_set_params_t set_params;

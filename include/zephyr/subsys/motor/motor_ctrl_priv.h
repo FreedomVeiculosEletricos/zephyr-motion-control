@@ -7,15 +7,6 @@
 #ifndef ZEPHYR_INCLUDE_SUBSYS_MOTOR_MOTOR_CTRL_PRIV_H_
 #define ZEPHYR_INCLUDE_SUBSYS_MOTOR_MOTOR_CTRL_PRIV_H_
 
-/**
- * @file motor_ctrl_priv.h
- *
- * Subsystem wiring only — not application API. Controllers and pipelines are
- * registered via @c MOTOR_SUBSYS_DEFINE / @c MOTOR_SUBSYS_DEFINE_DT and
- * @ref motor_subsys_init (typically @c SYS_INIT). Do not call these from
- * product firmware.
- */
-
 #include <stdint.h>
 
 #include <zephyr/device.h>
@@ -30,7 +21,5 @@ int motor_ctrl_init(struct motor_ctrl *ctrl, const struct device *sensor,
 int motor_pipeline_init(struct motor_pipeline *pipeline, void *ctx);
 
 void motor_pipeline_reset(struct motor_pipeline *pipeline, void *ctx);
-
-void motor_pipeline_set_params(struct motor_pipeline *pipeline, void *ctx);
 
 #endif /* ZEPHYR_INCLUDE_SUBSYS_MOTOR_MOTOR_CTRL_PRIV_H_ */

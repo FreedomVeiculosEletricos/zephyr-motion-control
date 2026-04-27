@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * DC current on a full-bridge stage (two half-bridge legs): DT motor-controller,
- * subsystem registration, calibrate shunt, enable bridge, command torque.
+ * subsystem registration, calibrate shunt, enable bridge, command current (A).
  * Controller parameters and DC current-loop gains come from Devicetree via
  * MOTOR_SUBSYS_DEFINE_DT — no manual shell config in application code.
  */
@@ -49,9 +49,9 @@ int main(void)
 	}
 
 	/* Example: ~0.05 N·m if Kt = 0.05 N·m/A (1 A reference). */
-	err = motor_set_torque(m, 0.05f);
+	err = motor_set_current(m, 0.2f);
 	if (err != 0) {
-		printf("motor_set_torque failed: %d\n", err);
+		printf("motor_set_current failed: %d\n", err);
 	}
 
 	k_sleep(K_SECONDS(2));

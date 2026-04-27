@@ -18,37 +18,7 @@ config MOTOR_CONTROL_LIB
 		   (((MOTOR_STAGE_HBRIDGE_STM32 || MOTOR_STAGE_HBRIDGE_ESP32S3) && \
 		    (MOTOR_SENSOR_ENCODER_STM32 || MOTOR_SENSOR_ENCODER_ESP32S3)))
 	help
-	  Builds motor_ctrl, motor_* API, and the dc-torque algorithm backend.
-
-config MOTOR_CTRL_OUTER_LOOPS
-	bool "Run speed/position loops in a dedicated thread (Rates 1–2)"
-	default y
-	depends on MOTOR_CONTROL_LIB
-	help
-	  When enabled, only the current loop runs in ISR; outer loops run in a
-	  dedicated thread woken by k_sem_give from the ISR (decimated) and read a
-	  short sensor snapshot under a spinlock.
-
-if MOTOR_CTRL_OUTER_LOOPS
-
-config MOTOR_CTRL_OUTER_STACK_SIZE
-	int "Outer loop thread stack size (bytes)"
-	default 1024
-
-config MOTOR_CTRL_OUTER_THREAD_PRIO
-	int "Outer loop thread priority"
-	default 5
-
-config MOTOR_CTRL_OUTER_TARGET_HZ
-	int "Outer-loop wake rate target (Hz); ISR decimates k_sem_give to match"
-	default 1000
-	range 1 20000
-	help
-	  The inner ISR runs at inner_rate_hz (from DT via subsystem). The outer
-	  thread is woken at approximately this rate using k_sem_give after
-	  inner_rate_hz / MOTOR_CTRL_OUTER_TARGET_HZ inner ticks.
-
-endif # MOTOR_CTRL_OUTER_LOOPS
+	  Builds motor_ctrl, motor_* API, and the dc current algorithm backend.
 
 config MOTOR_SUBSYS
 	bool "Motor multi-instance DT registration (motor_subsys_* API)"

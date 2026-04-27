@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Minimal DC current loop demo: DT motor-controller node, subsystem registration,
- * calibrate shunt, enable bridge, command torque. Parameters from Devicetree.
+ * calibrate shunt, enable bridge, command current (A). Parameters from Devicetree.
  */
 
 #include <stdio.h>
@@ -46,9 +46,9 @@ int main(void)
 		return 0;
 	}
 
-	err = motor_set_torque(m, 0.05f);
+	err = motor_set_current(m, 0.2f);
 	if (err != 0) {
-		printf("motor_set_torque failed: %d\n", err);
+		printf("motor_set_current failed: %d\n", err);
 	}
 
 	k_sleep(K_SECONDS(2));

@@ -16,28 +16,12 @@ static struct motor_algo_dc_current_data *dc_data_from_block(struct motor_block 
 	return CONTAINER_OF(self, struct motor_algo_dc_current_data, base);
 }
 
-int motor_dc_current_block_init(struct motor_block *self)
-{
-	struct motor_algo_dc_current_data *st = dc_data_from_block(self);
-
-	if (st->timing.control_loop_dt_s <= 0.0f) {
-		return -EINVAL;
-	}
-
-	if ((st->pi.kp == 0.0f) && (st->pi.ki == 0.0f)) {
-		return -EINVAL;
-	}
-
-	st->i_integral = 0.0f;
-	return 0;
-}
-
 void motor_dc_current_block_entry(struct motor_block *self, const struct motor_block_in *in,
 				  struct motor_block_out *out)
 {
 	struct motor_algo_dc_current_data *st = dc_data_from_block(self);
 	float ia_meas = in->sense->hot.i_phase[0];
-	float err = in->sp->i_torque_a - ia_meas;
+	float err = in->sp->i_ref_a - ia_meas;
 	float Ts;
 	float kp;
 	float ki;
@@ -60,9 +44,9 @@ void motor_dc_current_block_entry(struct motor_block *self, const struct motor_b
 	}
 	k_spin_unlock(&st->current_pi_lock, key);
 
-	out->cmd->kind = MOTOR_ACTUATOR_CMD_ALPHA_BETA;
-	out->cmd->u.ab.valpha = u;
-	out->cmd->u.ab.vbeta = 0.0f;
+	out->cmd->kind = MOTOR_ACTUATOR_CMD_DUTY_DIRECT;
+	out->cmd->u.duty.n = 1U;
+	out->cmd->u.duty.duty[0] = u;
 }
 
 void motor_dc_current_block_set_params(struct motor_block *self)

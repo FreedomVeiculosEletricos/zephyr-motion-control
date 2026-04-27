@@ -29,14 +29,11 @@ static struct motor_algo_dc_current_data algo_a = {
 	},
 	.limits = {
 		.i_max_a = 5.0f,
-		.speed_max_rad_s = 100.0f,
 		.vbus_derating_start = 0.0f,
 		.temp_derating_start = 0.0f,
 		.temp_fault = 150.0f,
 	},
 	.timing = {.control_loop_dt_s = 1.0f / 20000.0f},
-	.kt_nm_per_a = 0.05f,
-	.pole_pairs = 1U,
 };
 static struct motor_algo_dc_current_data algo_b = {
 	MOTOR_ALGO_DC_CURRENT_BASE_INITIALIZER
@@ -48,14 +45,11 @@ static struct motor_algo_dc_current_data algo_b = {
 	},
 	.limits = {
 		.i_max_a = 5.0f,
-		.speed_max_rad_s = 100.0f,
 		.vbus_derating_start = 0.0f,
 		.temp_derating_start = 0.0f,
 		.temp_fault = 150.0f,
 	},
 	.timing = {.control_loop_dt_s = 1.0f / 20000.0f},
-	.kt_nm_per_a = 0.05f,
-	.pole_pairs = 1U,
 };
 static struct motor_block *const blocks_a[] = { &algo_a.base };
 static struct motor_block *const blocks_b[] = { &algo_b.base };
@@ -186,10 +180,10 @@ ZTEST(motor_subsys_suite, test_motor_group_single_lifecycle)
 	zassert_equal(gst, MOTOR_GROUP_IDLE, NULL);
 	zassert_equal(fm, 0U, NULL);
 
-	zassert_equal(motor_group_set_torque(&g_life, (float[]){0.01f}), -ENOEXEC);
+	zassert_equal(motor_group_set_current(&g_life, (float[]){0.01f}), -ENOEXEC);
 
 	zassert_equal(motor_group_enable(&g_life, K_SECONDS(2)), 0, NULL);
-	zassert_equal(motor_group_set_torque(&g_life, (float[]){0.01f}), 0, NULL);
+	zassert_equal(motor_group_set_current(&g_life, (float[]){0.01f}), 0, NULL);
 	zassert_equal(motor_group_set_drive_mode(&g_life, MOTOR_DRIVE_NORMAL), 0, NULL);
 
 	zassert_equal(motor_group_disable(&g_life, K_SECONDS(2)), 0, NULL);
@@ -223,7 +217,7 @@ ZTEST(motor_subsys_suite, test_motor_group_two_members)
 	motor_t ma = make_motor_a();
 	motor_t mb = make_motor_b();
 	motor_t members[2];
-	float tau[2] = {0.01f, 0.02f};
+	float i_ref[2] = {0.01f, 0.02f};
 
 	zassert_not_null(ma, NULL);
 	zassert_not_null(mb, NULL);
@@ -234,7 +228,7 @@ ZTEST(motor_subsys_suite, test_motor_group_two_members)
 	zassert_equal(motor_group_add(&g_pair, members, 2, MOTOR_GROUP_FAULT_DISABLE_ALL), 0);
 
 	zassert_equal(motor_group_enable(&g_pair, K_SECONDS(2)), 0, NULL);
-	zassert_equal(motor_group_set_torque(&g_pair, tau), 0, NULL);
+	zassert_equal(motor_group_set_current(&g_pair, i_ref), 0, NULL);
 	zassert_equal(motor_group_disable(&g_pair, K_SECONDS(2)), 0, NULL);
 
 	motor_estop(ma);

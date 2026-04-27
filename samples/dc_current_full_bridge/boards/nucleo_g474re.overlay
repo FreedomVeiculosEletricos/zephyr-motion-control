@@ -14,12 +14,15 @@
 
 		sensor = <&motor_sensor_brushed>;
 		actuator = <&motor_stage_brushed>;
-		algorithm = "dc-current";
-		dc-kt-mnm-per-a = <50>;
-		pole-pairs = <1>;
+		algorithm = <&motor_algo_dc_brushed>;
+	};
+
+	motor_algo_dc_brushed: motor-algorithm-dc-brushed {
+		compatible = "zephyr,motor-algorithm-dc-current";
+		status = "okay";
+
 		current-loop-rate-hz = <20000>;
 		i-max-ma = <3000>;
-		speed-max-rpm = <6000>;
 	};
 
 	motor_sensor_brushed: motor-sensor-brushed {

@@ -1,37 +1,65 @@
 # Copyright (c) 2026 Zephyr Motor Control Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-# Shared power-stage semantics (fault GPIOs, PWM timing, optional monitoring).
-# Leaf bindings add Zephyr PWM specifiers or SoC HAL nodes (STM32 LL, ESP MCPWM).
+# Base binding: N half-bridges, one HS + one LS transistor per leg, shared
+# timebase. Leaf bindings (STM32 LL, ESP32 MCPWM) map legs to SoC hardware.
 
 include: base.yaml
+
+description: |
+  Power stage as an ordered set of N half-bridges: each leg is a totem of one
+  high-side (HS) and one low-side (LS) transistor. All legs share one counter /
+  period so switching stays phase-aligned. Optional nFAULT, nSLEEP, dual-channel
+  STO, and monitoring ADCs apply to the stage as a whole.
+
+  One model supports DC brushed, BLDC/PMSM (inverter), and generic converters
+  by varying N and how the driver maps duty to FETs:
+
+  • N = 1  — one half-bridge, unidirectional (magnitude on one leg)
+  • N = 2  — full-bridge DC: two half-bridges, bidirectional (sign / magnitude)
+  • N = 3  — three half-bridges (future BLDC/PMSM, SVPWM, same binding family)
+  • N ≥ 1  — interleaved or multi-cell converters (same per-leg model)
+
+  Example: STM32 LL, TIM3, two legs for full-bridge DC
+  (DT node properties — see zephyr,motor-stage-hbridge-stm32):
+
+    motor_brushed: motor-brushed {
+        compatible = "zephyr,motor-stage-hbridge-stm32";
+        st,pwm-timer  = <&timers3>;
+        pwm-channels  = <1 2>;
+        pwm-frequency = <20000>;
+        trgo-source   = "update";
+    };
+
+  Example: future 3‑phase, TIM1 complementary (HS+LS+deadtime per leg):
+
+    motor_3ph: motor-3ph {
+        compatible = "zephyr,motor-stage-hbridge-stm32";
+        st,pwm-timer = <&timers1>;
+        pwm-channels = <1 2 3>;
+        pwm-frequency = <20000>;
+        deadtime-ns   = <400>;
+        stm32,complementary-pwm;
+        trgo-source  = "update";
+    };
 
 properties:
   nfault-gpios:
     type: phandle-array
     description: |
-      Gate driver nFAULT input GPIO (active-low, interrupt-capable).
-      When asserted, the hardware has already disabled outputs.
-      The backend fires motor_fault_cb_t with MOTOR_FAULT_GATE_DRIVER.
+      Gate driver nFAULT (active-low, interrupt-capable). When asserted, outputs
+      are already disabled. Backend may report MOTOR_FAULT_GATE_DRIVER.
 
   nsleep-gpios:
     type: phandle-array
-    description: |
-      Gate driver nSLEEP / shutdown GPIO (active-high or active-low
-      depending on driver). Used to place the driver in low-power mode
-      when the motor is idle.
+    description: nSLEEP / shutdown; low-power when motor is idle.
 
   sto-gpios:
     type: phandle-array
     description: |
-      Dual-channel Safe Torque Off input GPIOs [STO_CH1, STO_CH2].
-      Both channels must be GPIO_ACTIVE_HIGH and interrupt-capable.
-      When both assert, PWM outputs are inhibited in hardware.
-      Required for ASIL-B and above. If absent, the actuator's
-      sto_arm op returns -ENOTSUP.
+      Dual-channel STO inputs [STO_CH1, STO_CH2], GPIO_ACTIVE_HIGH, IRQ-capable.
       Example:
-        sto-gpios = <&gpiob 10 GPIO_ACTIVE_HIGH>,
-                    <&gpiob 11 GPIO_ACTIVE_HIGH>;
+        sto-gpios = <&gpiob 10 GPIO_ACTIVE_HIGH>, <&gpiob 11 GPIO_ACTIVE_HIGH>;
 
   pwm-frequency:
     type: int
@@ -42,27 +70,19 @@ properties:
     type: int
     default: 0
     description: |
-      Dead-time between complementary half-bridge transitions
-      (nanoseconds). Set to 0 if the gate driver IC handles
-      dead-time internally (e.g. DRV8833) or the SoC binding documents
-      where dead-time is applied.
+      Dead-time between HS/LS in a complementary pair (ns). 0 if the gate
+      driver or binding applies dead-time elsewhere.
 
   vbus-fault-threshold-mv:
     type: int
     description: |
-      Bus voltage fault threshold in millivolts used during the
-      self_test() transistor check sequence. If the bus voltage
-      collapses below this level while both low-side transistors
-      are off, a multiple-short condition is flagged.
+      For self_test(): if bus sags below this mV with both LS off, report short.
 
   io-channels:
     type: phandle-array
-    description: |
-      Optional ADC channels for bus voltage and board temperature.
-      Channel names: "v_bus", "temp_board".
+    description: 'Optional Vbus / board temp. Names: "v_bus", "temp_board".'
 
   io-channel-names:
     type: string-array
     description: |
-      Names for optional io-channels entries.
       Valid names: "v_bus", "temp_board".

@@ -1,0 +1,42 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  DC brushed / single-axis current loop: scalar PI, duty to the H-bridge driver.
+  Referenced from zephyr,motor-controller via the ``algorithm`` phandle.
+
+compatible: "zephyr,motor-algorithm-dc-current"
+
+include: base.yaml
+
+properties:
+  dc-current-kp-milli:
+    type: int
+    default: 500
+    description: Current-loop Kp × 1000 (500 = 0.5).
+
+  dc-current-ki-milli:
+    type: int
+    default: 2000000
+    description: Current-loop Ki × 1000 (2000000 = 2000).
+
+  dc-current-out-min-milli:
+    type: int
+    default: -1000
+    description: Normalised duty lower limit × 1000 (-1000 = -1.0).
+
+  dc-current-out-max-milli:
+    type: int
+    default: 1000
+    description: Normalised duty upper limit × 1000 (1000 = 1.0).
+
+  current-loop-rate-hz:
+    type: int
+    default: 20000
+    description: |
+      Inner-loop (ISR) rate in Hz. Must be ≤ PWM frequency on the actuator.
+
+  i-max-ma:
+    type: int
+    required: true
+    description: Software current limit in mA (enforced in the loop / limits struct).

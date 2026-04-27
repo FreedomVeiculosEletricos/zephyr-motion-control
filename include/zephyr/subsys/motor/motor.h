@@ -20,7 +20,7 @@ extern "C" {
  * @ingroup motor_control
  * @{
  *
- * Use this for generic commands and state (enable, torque setpoint, faults).
+ * Use this for generic commands and state (enable, current setpoint, faults).
  * Tunable parameters depend on the active pipeline: each predefined algorithm
  * module exposes its own public header (e.g. @ref motor_algo_dc_current.h under
  * @c motor/algorithms/dc_current/).
@@ -39,7 +39,8 @@ extern "C" {
  *   - Sensor backends (encoder vs sensorless vs Hall)
  *   - Phase count or topology
  *
- * Instances are registered with @c MOTOR_SUBSYS_DEFINE_DT (or @c MOTOR_SUBSYS_DEFINE);
+ * Instances are registered with @c MOTOR_SUBSYS_DEFINE_DT or @c MOTOR_SUBSYS_DEFINE_DT_DC_CURRENT
+ * (or @c MOTOR_SUBSYS_DEFINE);
  * sensor, actuator, pipeline, algorithm data, and rates come from Devicetree and
  * static initialisers — there is no application-level “init” beyond Zephyr
  * @c SYS_INIT running @ref motor_subsys_init when @c CONFIG_MOTOR_SUBSYS_AUTO_INIT is set.
@@ -47,19 +48,16 @@ extern "C" {
  *
  * State machine summary:
  *
- *   motor_enable()  → IDLE    → ALIGN (if needed) → RUN
- *   motor_disable() → RUN     → STOP  → IDLE
- *   motor_estop()   → ANY     → IDLE  (output cut immediately)
- *   fault event     → ANY     → FAULT
- *   motor_clear_fault() → FAULT → IDLE (if cause resolved)
+ *   motor_enable()        → IDLE  → RUN
+ *   motor_disable()       → RUN   → IDLE
+ *   motor_estop()         → any   → IDLE  (output cut immediately)
+ *   fault event           → any   → FAULT
+ *   motor_clear_fault()   → FAULT → IDLE  (if cause resolved)
  *
  * Valid commands per state:
- *   IDLE   : motor_enable(), motor_self_test()
- *   ALIGN  : none (wait for motor_state_cb MOTOR_STATE_RUN)
- *   RUN    : motor_set_torque(), motor_set_drive_mode(),
- *            motor_disable(), motor_estop()
- *   STOP   : motor_estop()
- *   FAULT  : motor_clear_fault(), motor_estop()
+ *   IDLE  : motor_enable(), motor_self_test()
+ *   RUN   : motor_set_current(), motor_set_drive_mode(), motor_disable(), motor_estop()
+ *   FAULT : motor_clear_fault(), motor_estop()
  */
 
 /* ------------------------------------------------------------------ */
@@ -90,7 +88,7 @@ void motor_register_callbacks(motor_t motor, motor_state_cb_t state_cb,
 int motor_self_test(motor_t motor, uint32_t *faults);
 
 /**
- * @brief Enable the motor (IDLE → ALIGN → RUN).
+ * @brief Enable the motor (IDLE → RUN).
  *
  * Non-blocking.  Completion notified via state_cb(MOTOR_STATE_RUN).
  *
@@ -100,7 +98,7 @@ int motor_self_test(motor_t motor, uint32_t *faults);
 int motor_enable(motor_t motor);
 
 /**
- * @brief Disable the motor with controlled deceleration (RUN → STOP → IDLE).
+ * @brief Disable the motor (RUN → IDLE).
  *
  * Non-blocking.  Completion notified via state_cb(MOTOR_STATE_IDLE).
  *
@@ -119,17 +117,17 @@ int motor_disable(motor_t motor);
 void motor_estop(motor_t motor);
 
 /**
- * @brief Set torque command (current control mode).
+ * @brief Set inner-loop current reference (A).
  *
- * Maps torque to an inner-loop current reference according to the active
- * pipeline (e.g. DC current uses @c kt_nm_per_a in @ref motor_algo_dc_current_data).
- * Switches to @c MOTOR_MODE_CURRENT. Valid only in RUN state.
+ * Updates @c motor_ctrl::setpoints consumed by the pipeline blocks. Valid only
+ * in @c MOTOR_STATE_RUN. Torque or flux references, if any, are algorithm- or
+ * application-specific — not this API.
  *
- * @param motor      Motor handle.
- * @param torque_nm  Target torque (N·m). Positive = forward.
- * @retval 0 on success, -EINVAL if mapping is unavailable or invalid.
+ * @param motor  Motor handle.
+ * @param i_a    Current reference in amperes (sign = direction where the plant supports it).
+ * @retval 0 on success, -EINVAL on bad state or handle.
  */
-int motor_set_torque(motor_t motor, float torque_nm);
+int motor_set_current(motor_t motor, float i_a);
 
 /**
  * @brief Set drive mode (normal / coast / brake / regen).

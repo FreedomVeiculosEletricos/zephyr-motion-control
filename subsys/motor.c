@@ -8,7 +8,6 @@
 
 #include <zephyr/drivers/motor/motor_actuator.h>
 #include <zephyr/drivers/motor/motor_sensor.h>
-#include <zephyr/subsys/motor/algorithms/dc_current/motor_algo_dc_current.h>
 #include <zephyr/subsys/motor/motor_controller.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/kernel.h>
@@ -62,10 +61,8 @@ void motor_estop(motor_t motor)
 	motor_ctrl_estop(motor);
 }
 
-int motor_set_torque(motor_t motor, float torque_nm)
+int motor_set_current(motor_t motor, float i_a)
 {
-	struct motor_algo_dc_current_data *dc;
-
 	if (motor == NULL) {
 		return -EINVAL;
 	}
@@ -74,18 +71,8 @@ int motor_set_torque(motor_t motor, float torque_nm)
 		return -EINVAL;
 	}
 
-	dc = motor->pipeline_ctx;
-	if (dc == NULL) {
-		return -EINVAL;
-	}
-
-	if (dc->kt_nm_per_a <= 1e-9f) {
-		return -EINVAL;
-	}
-
 	k_mutex_lock(&motor->lock, K_FOREVER);
-	motor->mode = MOTOR_MODE_CURRENT;
-	motor->setpoints.i_torque_a = torque_nm / dc->kt_nm_per_a;
+	motor->setpoints.i_ref_a = i_a;
 	k_mutex_unlock(&motor->lock);
 
 	return 0;

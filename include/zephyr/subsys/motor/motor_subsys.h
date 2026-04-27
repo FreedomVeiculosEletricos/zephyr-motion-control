@@ -8,7 +8,7 @@
 #define ZEPHYR_INCLUDE_SUBSYS_MOTOR_MOTOR_SUBSYS_H_
 
 #include <zephyr/subsys/motor/motor.h>
-#include <zephyr/subsys/motor/motor_dt.h>
+#include <zephyr/subsys/motor/algorithms/dc_current/motor_algo_dc_current.h>
 #include <zephyr/subsys/motor/motor_pipeline.h>
 #include <zephyr/device.h>
 #include <zephyr/kernel.h>
@@ -41,7 +41,7 @@ extern "C" {
  *      alignment sequences in parallel; the group transitions to
  *      RUN only when every member reports MOTOR_STATE_RUN.
  *
- *   5. Atomic group commands — motor_group_set_torque() writes
+ *   5. Atomic group commands — motor_group_set_current() writes
  *      setpoints to all members before any current loop fires the
  *      next actuation, eliminating inter-motor skew.
  *
@@ -73,7 +73,7 @@ extern "C" {
  *       motor_group_enable(&rotors);            // parallel align + RUN
  *
  *       float thrust[4] = {T0, T1, T2, T3};
- *       motor_group_set_torque(&rotors, thrust); // every 2.5 ms
+ *       motor_group_set_current(&rotors, i_ref); // every 2.5 ms
  *   }
  */
 
@@ -123,7 +123,7 @@ struct motor_subsys_entry {
 	/** Pipeline descriptor (blocks + optional hooks). */
 	struct motor_pipeline *pipeline;
 
-	/** Opaque root passed as @ref motor_block_in::algo. */
+	/** Algorithm root (e.g. @c motor_algo_dc_current_data); same as @c motor_ctrl::pipeline_ctx. */
 	void *pipeline_ctx;
 
 	/** Inner-loop ISR rate in Hz (e.g. @c current_loop_rate_hz from DT). */
@@ -161,17 +161,18 @@ struct motor_subsys_entry {
 	}
 
 /**
- * @brief Register a motor-controller instance from Devicetree (dc-current pipeline).
+ * @brief Register a motor-controller from Devicetree (dc-current blocks).
  *
- * Expands @ref motor_algo_dc_current_data from the `zephyr,motor-controller` node using
- * @ref MOTOR_DC_CURRENT_DATA_INITIALIZER.
+ * The controller's ``algorithm`` phandle must point to a node with compatible
+ * ``zephyr,motor-algorithm-dc-current``.  @ref MOTOR_DC_CURRENT_DATA_INITIALIZER
+ * reads tuning from that algorithm node.
  *
- * @param _nodelabel  DT node label (unquoted), e.g. motor_brushed.
- * @param _ctrl       Pre-declared @ref motor_ctrl instance (MOTOR_CTRL_DEFINE).
+ * @param _nodelabel  DT node label of the @c zephyr,motor-controller (unquoted).
+ * @param _ctrl       Pre-declared @ref motor_ctrl (MOTOR_CTRL_DEFINE).
  */
-#define MOTOR_SUBSYS_DEFINE_DT(_nodelabel, _ctrl)                                                  \
+#define MOTOR_SUBSYS_DEFINE_DT_DC_CURRENT(_nodelabel, _ctrl)                                       \
 	static struct motor_algo_dc_current_data UTIL_CAT(_motor_dc_, _nodelabel) =                  \
-		MOTOR_DC_CURRENT_DATA_INITIALIZER(DT_NODELABEL(_nodelabel));                        \
+		MOTOR_DC_CURRENT_DATA_INITIALIZER(DT_PHANDLE(DT_NODELABEL(_nodelabel), algorithm));  \
 	static struct motor_block *const UTIL_CAT(_motor_dc_blocks_, _nodelabel)[] = {              \
 		&UTIL_CAT(_motor_dc_, _nodelabel).base,                                              \
 	};                                                                                         \
@@ -179,23 +180,23 @@ struct motor_subsys_entry {
 		.name = "dc_current",                                                               \
 		.blocks = UTIL_CAT(_motor_dc_blocks_, _nodelabel),                                   \
 		.n_blocks = 1,                                                                       \
-		.init = NULL,                                                                        \
-		.reset = NULL,                                                                       \
-		.set_params = NULL,                                                                  \
 	};                                                                                         \
 	MOTOR_SUBSYS_DEFINE(motor_entry_##_nodelabel, (_ctrl),                                     \
 			    DEVICE_DT_GET(DT_PHANDLE(DT_NODELABEL(_nodelabel), sensor)),           \
 			    DEVICE_DT_GET(DT_PHANDLE(DT_NODELABEL(_nodelabel), actuator)),         \
 			    &UTIL_CAT(_motor_pl_, _nodelabel), &UTIL_CAT(_motor_dc_, _nodelabel),    \
-			    DT_PROP(DT_NODELABEL(_nodelabel), current_loop_rate_hz),                 \
+			    DT_PROP(DT_PHANDLE(DT_NODELABEL(_nodelabel), algorithm),                 \
+				    current_loop_rate_hz),                                        \
 			    STRINGIFY(_nodelabel))
+
+#define MOTOR_SUBSYS_DEFINE_DT(_nodelabel, _ctrl) MOTOR_SUBSYS_DEFINE_DT_DC_CURRENT(_nodelabel, _ctrl)
 
 /* ------------------------------------------------------------------ */
 /* Subsystem init and instance discovery                               */
 /* ------------------------------------------------------------------ */
 
 /**
- * @brief Bootstrap all motors declared with @c MOTOR_SUBSYS_DEFINE / @c MOTOR_SUBSYS_DEFINE_DT.
+ * @brief Bootstrap all motors declared with @c MOTOR_SUBSYS_DEFINE / @c MOTOR_SUBSYS_DEFINE_DT_DC_CURRENT.
  *
  * Single entry point for the module: walks the iterable section, wires sensor,
  * actuator, pipeline, and algorithm storage (Devicetree + static data), then
@@ -410,19 +411,19 @@ int motor_group_clear_fault(struct motor_group *group);
 /* ------------------------------------------------------------------ */
 
 /**
- * @brief Write torque setpoints to all group members atomically.
+ * @brief Write current references (A) to all group members atomically.
  *
  * Writes are batched under the group spinlock and applied before the
  * next current-loop ISR fires on any member.
  *
  * All members must be in MOTOR_STATE_RUN.
  *
- * @param group    Group instance.
- * @param torques  Array of torque values (N·m), length = group->count.
- *                 Positive = forward. Index matches member add order.
+ * @param group  Group instance.
+ * @param i_a    Array of current references in A, length = group->count.
+ *               Index matches member add order.
  * @retval 0 on success. -ENOEXEC if group not in RUN state.
  */
-int motor_group_set_torque(struct motor_group *group, const float *torques);
+int motor_group_set_current(struct motor_group *group, const float *i_a);
 
 /**
  * @brief Set drive mode on all group members.

@@ -24,14 +24,11 @@ static struct motor_algo_dc_current_data algo_data = {
 	.limits =
 		{
 			.i_max_a = 5.0f,
-			.speed_max_rad_s = 100.0f,
 			.vbus_derating_start = 0.0f,
 			.temp_derating_start = 0.0f,
 			.temp_fault = 150.0f,
 		},
 	.timing = {.control_loop_dt_s = 1.0f / 20000.0f},
-	.kt_nm_per_a = 0.05f,
-	.pole_pairs = 1U,
 };
 static struct motor_block *const test_blocks[] = { &algo_data.base };
 static struct motor_pipeline test_pipeline = {
@@ -81,7 +78,7 @@ ZTEST(motor_api_suite, test_motor_ctrl_init_rejects_zero_inner_rate)
 		      -EINVAL);
 }
 
-ZTEST(motor_api_suite, test_motor_set_torque_rejects_null_handle)
+ZTEST(motor_api_suite, test_motor_set_current_rejects_null_handle)
 {
-	zassert_equal(motor_set_torque(NULL, 0.0f), -EINVAL);
+	zassert_equal(motor_set_current(NULL, 0.0f), -EINVAL);
 }

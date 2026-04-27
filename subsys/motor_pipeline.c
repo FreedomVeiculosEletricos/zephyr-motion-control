@@ -8,24 +8,10 @@
 
 int motor_pipeline_init(struct motor_pipeline *pipeline, void *ctx)
 {
+	ARG_UNUSED(ctx);
+
 	if (pipeline == NULL) {
 		return -EINVAL;
-	}
-
-	if (pipeline->init != NULL) {
-		return pipeline->init(pipeline, ctx);
-	}
-
-	for (uint8_t i = 0; i < pipeline->n_blocks; i++) {
-		struct motor_block *b = pipeline->blocks[i];
-
-		if ((b != NULL) && (b->init != NULL)) {
-			int err = b->init(b);
-
-			if (err != 0) {
-				return err;
-			}
-		}
 	}
 
 	return 0;
@@ -33,12 +19,9 @@ int motor_pipeline_init(struct motor_pipeline *pipeline, void *ctx)
 
 void motor_pipeline_reset(struct motor_pipeline *pipeline, void *ctx)
 {
-	if (pipeline == NULL) {
-		return;
-	}
+	ARG_UNUSED(ctx);
 
-	if (pipeline->reset != NULL) {
-		pipeline->reset(pipeline, ctx);
+	if (pipeline == NULL) {
 		return;
 	}
 
@@ -51,38 +34,23 @@ void motor_pipeline_reset(struct motor_pipeline *pipeline, void *ctx)
 	}
 }
 
-void motor_pipeline_set_params(struct motor_pipeline *pipeline, void *ctx)
-{
-	if (pipeline == NULL) {
-		return;
-	}
-
-	if (pipeline->set_params != NULL) {
-		pipeline->set_params(pipeline, ctx);
-		return;
-	}
-
-	for (uint8_t i = 0; i < pipeline->n_blocks; i++) {
-		struct motor_block *b = pipeline->blocks[i];
-
-		if ((b != NULL) && (b->set_params != NULL)) {
-			b->set_params(b);
-		}
-	}
-}
-
 void motor_pipeline_run_stage(struct motor_pipeline *pipeline, void *ctx,
 			      enum motor_pipeline_stage stage, uint32_t stage_tick,
 			      const struct motor_block_in *in, struct motor_block_out *out)
 {
 	struct motor_block_in run_in;
 
+	ARG_UNUSED(ctx);
+
 	if ((pipeline == NULL) || (in == NULL) || (out == NULL)) {
 		return;
 	}
 
+	if (stage != MOTOR_STAGE_INNER_ISR) {
+		return;
+	}
+
 	run_in = *in;
-	run_in.algo = ctx;
 
 	for (uint8_t i = 0; i < pipeline->n_blocks; i++) {
 		struct motor_block *b = pipeline->blocks[i];

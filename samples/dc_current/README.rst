@@ -19,11 +19,11 @@ stage drivers are SoC-specific (e.g. ``zephyr,motor-sensor-encoder-stm32``,
 ``zephyr,motor-stage-hbridge-stm32``).
 
 The application uses the **motor subsystem** API: devicetree declares a
-``zephyr,motor-controller`` node (label ``motor_brushed``) that references the sensor
-and actuator; the sample registers the instance with ``MOTOR_SUBSYS_DEFINE_DT()`` and
-obtains a ``motor_t`` via ``motor_subsys_get_by_label("motor_brushed")``. PI gains,
-shell limits/timing, and other fields are expanded from Devicetree (e.g.
-``dc-kt-mnm-per-a`` for the torque constant).
+``zephyr,motor-controller`` node (label ``motor_brushed``) with phandles to the
+sensor, actuator, and a ``zephyr,motor-algorithm-dc-current`` child for PI gains
+and limits; the sample uses ``MOTOR_SUBSYS_DEFINE_DT()`` and
+``motor_subsys_get_by_label("motor_brushed")``. The app commands **current (A)**
+with ``motor_set_current()``.
 
 For a **dedicated full-bridge** sample (two half-bridge legs, same algorithm), see
 :file:`../dc_current_full_bridge/README.rst`.
@@ -55,7 +55,7 @@ Hardware (NUCLEO-G474RE)
   op-amp gain). Set effective ``amps_per_volt`` in the sensor driver for your front-end.
 * **IRQ priority**: On the STM32 LL path, set ``zephyr,adc-irq-priority`` on the sensor
   node so the **ADC ISR** is higher priority than SysTick and lower than non-preemptible
-  code, per your policy. The outer-loop thread uses ``CONFIG_MOTOR_CTRL_OUTER_THREAD_PRIO``.
+  code, per your policy.
 
 Synchronous chain (STM32 LL)
 ----------------------------
@@ -79,9 +79,6 @@ Sequence (Mermaid — render in editors / docs that support it):
      ADC->>ISR: ADC_conversion_complete_IRQ
      ISR->>CB: invoke_registered_callback
      CB->>ALG: sensor_update_get_PI_set_vector
-
-Slower loops (rates 1–2) run in a dedicated **thread** with ``k_mutex`` and the double
-buffer ``sense_buf``; only rate 0 (current) runs in the ISR.
 
 Build (STM32 LL — full bridge, two half-bridge legs)
 ----------------------------------------------------
@@ -122,4 +119,4 @@ Safety
 ------
 
 Use a current-limited supply, freewheel / brake as required by your bridge, and verify
-nFAULT / interlocks before applying torque. This sample is for **laboratory** use.
+nFAULT / interlocks before applying current. This sample is for **laboratory** use.

@@ -2,24 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 
 description: |
-  Top-level motor controller node. References one sensor backend and
-  one power stage backend and ties them into a complete controller
-  instance that the motor subsystem manages.
+  Motor controller: composes one sensor, one actuator, and one algorithm instance
+  (phandle). The user wires concrete devices and an algorithm node in Devicetree;
+  the subsystem exposes a @c motor_t handle to the application API.
 
-  This node is the composition point for the three-layer API:
-    - sensor   phandle → sensor/feedback layer (interface B)
-    - actuator phandle → power stage layer     (interface C)
-    - algorithm        → controller algorithm  (interface A dispatch)
+  The motor application API sets a **current reference** (A); the algorithm
+  block maps measurements and setpoint to actuator commands.  Different algorithm
+  compatibles (e.g. FOC) will be separate child bindings referenced the same way.
 
-  The motor subsystem's MOTOR_SUBSYS_DEFINE_DT() macro resolves the
-  sensor and actuator device handles from these phandles at compile
-  time, so no manual device lookup is needed in application code.
-
-  Motor physical constants (Rs, Ld, Lq, flux-linkage, pole-pairs) and
-  operating limits (current, speed, rates) come from this node. DC inner-loop
-  gains may be set via optional dc-current-*-milli properties; the
-  subsystem expands them at build time — applications do not construct
-  shell config manually for DT-driven motors.
+  Extending for FOC/BLDC (future) typically adds a new algorithm compatible and
+  keeps the same @c sensor / @c actuator / @c algorithm phandle pattern on this
+  node (or a specialized controller compatible that includes the same phandles).
 
 compatible: "zephyr,motor-controller"
 
@@ -30,175 +23,19 @@ properties:
     type: phandle
     required: true
     description: |
-      Sensor backend device node. Must be compatible with one of:
-        zephyr,motor-sensor-encoder-stm32
-        zephyr,motor-sensor-encoder-esp32s3
-        zephyr,motor-sensor-hall
-        zephyr,motor-sensor-resolver
-        zephyr,motor-sensor-sensorless
+      Sensor backend (e.g. zephyr,motor-sensor-encoder-stm32). See
+      per-sensor bindings (e.g. pole-pairs on position sensors).
 
   actuator:
     type: phandle
     required: true
     description: |
-      Power stage backend device node. Must be compatible with one of:
-        zephyr,motor-stage-hbridge-stm32
-        zephyr,motor-stage-hbridge-esp32s3
-        zephyr,motor-stage-3ph-inverter
+      Power stage (e.g. zephyr,motor-stage-hbridge-stm32): N half-bridges, see
+      zephyr,motor-stage-hbridge-common.yaml.
 
   algorithm:
-    type: string
-    required: true
-    enum:
-      - "foc"        # Field-Oriented Control (PMSM / BLDC sinusoidal)
-      - "6step"      # Trapezoidal 6-step commutation (BLDC)
-      - "openloop"   # Open-loop voltage/duty (commissioning, brushed)
-      - "dc-current"  # DC brushed: scalar current PI (torque via Kt)
-      - "vf-scalar"  # V/f scalar control (AC induction)
-      - "stepdir"    # Step/direction (stepper open or closed loop)
-    description: |
-      Controller algorithm vtable to instantiate at init.
-      Kconfig options gate which algorithms are compiled into the
-      firmware image (CONFIG_MOTOR_ALGO_FOC, CONFIG_MOTOR_ALGO_6STEP,
-      etc.). Selecting an algorithm not compiled in causes a build
-      error.
-
-  dc-kt-mnm-per-a:
-    type: int
-    default: 0
-    description: |
-      DC motor torque constant in millinewton-metre per ampere (mN·m/A).
-      Required for algorithm "dc-current" (non-zero). Example: 50 means 0.05 N·m/A.
-
-  dc-current-kp-milli:
-    type: int
-    default: 500
-    description: |
-      DC current algorithm — current-loop Kp multiplied by 1000 (500 = 0.5).
-
-  dc-current-ki-milli:
-    type: int
-    default: 2000000
-    description: |
-      DC current algorithm — current-loop Ki multiplied by 1000 (2000000 = 2000).
-
-  dc-current-out-min-milli:
-    type: int
-    default: -1000
-    description: |
-      Normalised output lower saturation, multiplied by 1000 (-1000 = -1.0).
-
-  dc-current-out-max-milli:
-    type: int
-    default: 1000
-    description: |
-      Normalised output upper saturation, multiplied by 1000 (1000 = 1.0).
-
-  pole-pairs:
-    type: int
+    type: phandle
     required: true
     description: |
-      Motor pole pairs. Used by the controller for:
-        - Electrical ↔ mechanical angle conversion
-        - Rated speed validation (speed-max-rpm × pole-pairs → max ω_elec)
-        - BEMF observer scaling
-
-  current-loop-rate-hz:
-    type: int
-    default: 20000
-    description: |
-      Current loop execution rate in Hz. Must be ≤ the PWM switching
-      frequency defined in the actuator node. The power stage backend
-      fires the control loop callback at this rate via the PWM period
-      ISR.
-
-  speed-loop-rate-hz:
-    type: int
-    default: 1000
-    description: Speed loop (Rate 1) execution rate in Hz.
-
-  position-loop-rate-hz:
-    type: int
-    default: 200
-    description: |
-      Position loop (Rate 2) execution rate in Hz.
-      Set to 0 to disable the position loop (speed mode only).
-
-  supervision-rate-hz:
-    type: int
-    default: 50
-    description: |
-      Supervision loop (Rate 3) rate in Hz. Handles fault policy,
-      thermal derating, state machine transitions, and watchdog.
-
-  i-max-ma:
-    type: int
-    required: true
-    description: |
-      Software peak current limit in milliamperes. Applied by the
-      current loop before the hardware comparator limit defined in
-      the actuator node (i-peak-limit-ma).
-
-  speed-max-rpm:
-    type: int
-    required: true
-    description: Maximum mechanical speed in RPM.
-
-  temp-derating-start-dc:
-    type: int
-    default: 8000
-    description: |
-      Temperature above which torque derating begins, in deci-Celsius.
-      Example: 8000 = 80.0 °C. The torque limit is linearly reduced
-      between this threshold and temp-fault-dc.
-
-  temp-fault-dc:
-    type: int
-    default: 10000
-    description: |
-      Overtemperature fault threshold in deci-Celsius.
-      Example: 10000 = 100.0 °C. MOTOR_FAULT_OVERTEMP_MOTOR or
-      MOTOR_FAULT_OVERTEMP_BOARD is raised and the motor is disabled.
-
-  # ── Motor physical constants (static, used by algorithm backend) ──
-
-  rs-mohm:
-    type: int
-    description: |
-      Stator resistance in milliohms (mΩ). Required for FOC, BEMF
-      observer, and flux observer algorithms.
-
-  ld-uh:
-    type: int
-    description: D-axis inductance in microhenries (µH).
-
-  lq-uh:
-    type: int
-    description: |
-      Q-axis inductance in microhenries (µH).
-      For SPM (surface magnet): lq-uh = ld-uh.
-      For IPM (interior magnet): lq-uh > ld-uh.
-
-  flux-linkage-uwb:
-    type: int
-    description: |
-      Permanent magnet flux linkage in micro-Weber (µWb).
-      Used by FOC for MTPA optimisation and back-EMF compensation.
-      Not applicable to AC induction motors.
-
-  rotor-inertia-gcm2:
-    type: int
-    description: |
-      Rotor moment of inertia in g·cm². Used by the speed loop for
-      feed-forward inertia compensation and autotuning. Optional.
-
-  # ── Settings subsystem key ─────────────────────────────────────────
-
-  settings-key:
-    type: string
-    description: |
-      Base key under which shell/algorithm settings are persisted via the
-      Zephyr settings subsystem. Defaults to the DT node label string
-      if not specified (e.g. "motor0").
-      Example: settings-key = "drive/axis0";
-      Gain entries are written as "<settings-key>/kp_iq", etc.
+      Algorithm instance (e.g. a node with compatible
+      "zephyr,motor-algorithm-dc-current" and tuning properties).

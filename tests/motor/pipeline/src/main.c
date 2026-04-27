@@ -31,14 +31,11 @@ static struct motor_algo_dc_current_data algo_data = {
 	.limits =
 		{
 			.i_max_a = 5.0f,
-			.speed_max_rad_s = 100.0f,
 			.vbus_derating_start = 0.0f,
 			.temp_derating_start = 0.0f,
 			.temp_fault = 150.0f,
 		},
 	.timing = {.control_loop_dt_s = 1.0f / 20000.0f},
-	.kt_nm_per_a = 0.05f,
-	.pole_pairs = 1U,
 };
 static struct motor_block *const pipeline_blocks[] = { &algo_data.base };
 static struct motor_pipeline pipeline_pl = {
@@ -69,14 +66,14 @@ ZTEST(motor_pipeline_suite, test_inner_step_reaches_actuator)
 
 	zassert_equal(motor_enable(m), 0, NULL);
 
-	zassert_equal(motor_set_torque(m, 0.01f), 0, NULL);
+	zassert_equal(motor_set_current(m, 0.2f), 0, NULL);
 
 	motor_actuator_invoke_control_callback(act);
 
 	zassert_true(pipeline_motor.has_last_cmd, NULL);
-	zassert_equal(pipeline_motor.last_cmd.kind, MOTOR_ACTUATOR_CMD_ALPHA_BETA, NULL);
-	zassert_within(pipeline_motor.last_cmd.u.ab.vbeta, 0.0f, 1e-5f, NULL);
-	zassert_within(pipeline_motor.last_cmd.u.ab.valpha, 0.12f, 0.02f, NULL);
+	zassert_equal(pipeline_motor.last_cmd.kind, MOTOR_ACTUATOR_CMD_DUTY_DIRECT, NULL);
+	zassert_equal(pipeline_motor.last_cmd.u.duty.n, 1U, NULL);
+	zassert_within(pipeline_motor.last_cmd.u.duty.duty[0], 0.12f, 0.02f, NULL);
 
 	motor_estop(m);
 }
