@@ -1,0 +1,66 @@
+/*
+ * Copyright (c) 2026 Zephyr Motor Control Contributors
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * NUCLEO-G474RE: full-bridge DC on TIM1 complementary (CH1/CH1N + CH2/CH2N).
+ * TIM1 TRGO -> ADC1 injected.
+ */
+
+/ {
+	motor_brushed: motor-controller {
+		compatible = "zephyr,motor-controller";
+		status = "okay";
+
+		sensor = <&motor_sensor_brushed>;
+		actuator = <&motor_stage_brushed>;
+		algorithm = <&motor_algo_dc_brushed>;
+	};
+
+	motor_algo_dc_brushed: motor-algorithm-dc-brushed {
+		compatible = "zephyr,motor-algorithm-dc-current";
+		status = "okay";
+
+		i-max-ma = <3000>;
+	};
+
+	motor_sensor_brushed: motor-sensor-brushed {
+		compatible = "zephyr,motor-sensor-stm32";
+		status = "okay";
+
+		adc = <&adc1>;
+		adc-channels = <1>;
+		sync-actuator = <&motor_stage_brushed>;
+		zephyr,adc-irq-priority = <2>;
+	};
+
+	motor_stage_brushed: motor-stage-brushed {
+		compatible = "zephyr,motor-stage-hbridge-stm32";
+		status = "okay";
+
+		st,pwm-timer = <&timers1>;
+		slow-timer = <&motor_slow_counter>;
+		slow-sample-div = <10>;
+		pwm-channels = <1 2>;
+		pwm-frequency = <20000>;
+		deadtime-ns = <500>;
+		trgo-source = "update";
+
+		pinctrl-0 = <&tim1_ch1_pa8 &tim1_ch1n_pa7
+			     &tim1_ch2_pa9 &tim1_ch2n_pb0>;
+		pinctrl-names = "complementary";
+	};
+};
+
+&timers1 {
+	status = "okay";
+	st,prescaler = <0>;
+};
+
+&timers6 {
+	status = "okay";
+	st,prescaler = <0>;
+
+	motor_slow_counter: counter {
+		status = "okay";
+	};
+};

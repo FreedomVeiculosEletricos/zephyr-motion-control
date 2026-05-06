@@ -1,0 +1,36 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Full-bridge DC stage on Espressif MCPWM using the SoC mcpwm_ll HAL (not Zephyr PWM).
+  Applies to any target whose Espressif HAL exposes hal/mcpwm_ll.h for the MCPWM block.
+
+compatible: "zephyr,motor-stage-hbridge-espressif-mcpwm"
+
+include: ["zephyr,motor-stage-hbridge-common.yaml", pinctrl-device.yaml]
+
+properties:
+  mcpwm:
+    type: phandle
+    required: true
+    description: MCPWM controller (espressif,esp32-mcpwm), e.g. &mcpwm0.
+
+  mcpwm-index:
+    type: int
+    required: true
+    description: MCPWM group index (0 = first peripheral instance, 1 = second, etc.).
+
+  timer-id:
+    type: int
+    required: true
+    description: Timer index inside the group (typically 0 for first complementary pair).
+
+  prescale:
+    type: int
+    default: 1
+    description: MCPWM group clock prescaler (see espressif,esp32-mcpwm).
+
+  prescale-timer0:
+    type: int
+    default: 0
+    description: Timer prescaler for timer-id.

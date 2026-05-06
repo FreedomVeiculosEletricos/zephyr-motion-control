@@ -1,0 +1,5 @@
+# Copyright (c) 2026 Freedom Veiculos Eletricos
+# SPDX-License-Identifier: UNLICENSED
+
+zephyr_library_sources_ifdef(CONFIG_MOTOR_STAGE_HBRIDGE_STM32 motor_actuator_stm32.c)
+zephyr_library_sources_ifdef(CONFIG_MOTOR_STAGE_HBRIDGE_ESPRESSIF_MCPWM motor_actuator_espressif_mcpwm.c)

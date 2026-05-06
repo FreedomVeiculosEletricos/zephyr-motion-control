@@ -73,7 +73,6 @@
 		algorithm  = "foc";
 		pole-pairs = <4>;
 
-		current-loop-rate-hz  = <20000>;
 		speed-loop-rate-hz    = <1000>;
 		position-loop-rate-hz = <200>;
 		supervision-rate-hz   = <50>;
@@ -166,7 +165,6 @@
 		algorithm  = "foc";         /* change to "6step" for trapezoidal */
 		pole-pairs = <7>;
 
-		current-loop-rate-hz  = <16000>;
 		speed-loop-rate-hz    = <1000>;
 		position-loop-rate-hz = <0>;    /* disabled — speed mode only */
 		supervision-rate-hz   = <50>;
@@ -233,7 +231,6 @@
 		algorithm  = "openloop";
 		pole-pairs = <1>;
 
-		current-loop-rate-hz  = <20000>;
 		speed-loop-rate-hz    = <1000>;
 		position-loop-rate-hz = <200>;
 		supervision-rate-hz   = <50>;
@@ -299,7 +296,6 @@
 		algorithm  = "stepdir";
 		pole-pairs = <50>;
 
-		current-loop-rate-hz  = <200000>; /* microstep rate        */
 		speed-loop-rate-hz    = <1000>;
 		position-loop-rate-hz = <200>;
 		supervision-rate-hz   = <50>;

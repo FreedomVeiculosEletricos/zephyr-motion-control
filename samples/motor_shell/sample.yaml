@@ -1,0 +1,16 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# From repo root with ZEPHYR_EXTRA_MODULES: west twister -T samples/motor_shell
+
+sample:
+  description: Motor control interactive shell (STM32 LL, NUCLEO-G474RE)
+  name: motor_shell
+common:
+  tags: motor
+tests:
+  samples.motor.motor_shell:
+    build_only: true
+    extra_args: CONF_FILE=prj.conf
+    integration_platforms:
+      - nucleo_g474re

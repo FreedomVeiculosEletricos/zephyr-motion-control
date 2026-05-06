@@ -1,0 +1,9 @@
+# Copyright (c) 2026 Freedom Veiculos Eletricos
+# SPDX-License-Identifier: UNLICENSED
+
+menu "Motor control drivers"
+
+rsource "motor_sensor/Kconfig"
+rsource "motor_actuator/Kconfig"
+
+endmenu
