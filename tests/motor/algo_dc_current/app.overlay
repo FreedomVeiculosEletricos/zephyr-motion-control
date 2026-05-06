@@ -1,0 +1,32 @@
+/ {
+	dc_current_motor: motor-controller {
+		compatible = "zephyr,motor-controller";
+		status = "okay";
+
+		sensor = <&dc_current_sensor>;
+		actuator = <&dc_current_actuator>;
+		algorithm = <&dc_current_algo>;
+	};
+
+	dc_current_algo: motor-algorithm-dc-current {
+		compatible = "zephyr,motor-algorithm-dc-current";
+		status = "okay";
+
+		dc-current-kp-milli = <500>;
+		dc-current-ki-milli = <0>;
+		dc-current-out-min-milli = <(-1000)>;
+		dc-current-out-max-milli = <1000>;
+		i-max-ma = <5000>;
+	};
+
+	dc_current_sensor: motor-test-sensor {
+		compatible = "zephyr,motor-test-sensor";
+		status = "okay";
+	};
+
+	dc_current_actuator: motor-test-actuator {
+		compatible = "zephyr,motor-test-actuator";
+		status = "okay";
+		pwm-frequency = <20000>;
+	};
+};

@@ -35,7 +35,7 @@ optimal real-time performance and simpler coordination model.
 
 This module implements a comprehensive proposal by Gerson Fernando Budke
 (`@nandojve <https://github.com/nandojve>`_) that extends the unified driver
-concept into a full 5-layer motor control stack, covering everything from
+concept into a full motor control stack, covering everything from
 application-level commands down to hardware abstraction. The full proposal
 document is available as an attachment to `issue #102158
 <https://github.com/zephyrproject-rtos/zephyr/issues/102158>`_ and serves as
@@ -44,181 +44,316 @@ the baseline reference for this module's design.
 Architecture
 ************
 
-Shared type definitions (SI units, enums, state codes) used across all layers
-are defined in ``include/zephyr/motor_types.h``.
+Shared type definitions (state codes, drive modes, fault flags, the opaque
+``motor_t`` handle) used across all layers live in
+``include/zephyr/subsys/motor/motor_types.h``.
 
-The module is organized into five layers with three well-defined interfaces:
+The module is organized into layers with well-defined interfaces:
 
 .. code-block:: none
 
-   +----------------------------------------------+
-   |         Application Code                     |
-   +----------------------------------------------+
-                      |
-   +----------------------------------------------+
-   |  Interface A: motor.h                        |
-   |  Motor-type agnostic, opaque handle,         |
-   |  state machine, STO                          |
-   +----------------------------------------------+
-                      |
-   +----------------------------------------------+
-   |  Controller: motor_controller.h              |
-   |  Multi-rate scheduling, algorithm dispatch   |
-   +---------------------+------------------------+
-             |                        |
-   +--------------------+  +------------------------+
-   | Interface B:       |  | Interface C:           |
-   | motor_sensor.h     |  | motor_actuator.h       |
-   | Sensor backends    |  | Power stage backends   |
-   +--------------------+  +------------------------+
-                      |
-   +----------------------------------------------+
-   |  Subsystem: motor_subsys.h                   |
-   |  Multi-instance mgmt, motor groups           |
-   +----------------------------------------------+
+   +------------------------------------------------------------+
+   |                  Application Code                          |
+   +------------------------------------------------------------+
+                              |
+   +-----------------------------+  +---------------------------+
+   | Interface A:                |  | Algorithm public APIs:    |
+   | motor.h                     |  | motor/algorithms/<algo>/  |
+   | Generic state + lifecycle:  |  | <algo>.h                  |
+   |  enable / disable / estop / |  | Per-algorithm setpoints,  |
+   |  drive mode / fault clear / |  | gains, limits, runtime    |
+   |  get_status                 |  | state (e.g. dc-current:   |
+   |                             |  | set_current, get_state,   |
+   |                             |  | set_pi_gains, …)          |
+   +--------------+--------------+  +-------------+-------------+
+                  |                               |
+   +------------------------------------------------------------+
+   | Controller + Pipeline (internal):                           |
+   | motor_controller.h, motor_pipeline.h, motor_block.h         |
+   | Composable blocks scheduled per pipeline stage.             |
+   | Hot ISR (PWM period, ZLI on STM32) runs the inner block.    |
+   | Slow timer (PWM / slow-sample-div, default /10) wakes a     |
+   | per-instance thread for non-ISR work (e.g. angle fetch).    |
+   +-------------------+-----------------+----------------------+
+                       |                 |
+   +----------------------------+  +----------------------------+
+   | Interface B:               |  | Interface C:               |
+   | motor_sensor.h             |  | motor_actuator.h           |
+   | Hot ADC + optional Zephyr  |  | H-bridge family power      |
+   | Sensor angle channel       |  | stage (HS + LS, complemen- |
+   |                            |  | tary, dead-time, en-gpios) |
+   +----------------------------+  +----------------------------+
+                              |
+   +------------------------------------------------------------+
+   | Subsystem: motor_subsys.h                                   |
+   | DT auto-instantiation, instance discovery, motor groups,    |
+   | fault propagation policy                                    |
+   +------------------------------------------------------------+
 
 Application API -- Interface A
 ==============================
 
-Defined in ``include/zephyr/motor.h``. Provides a motor-type agnostic API
+Defined in ``include/zephyr/subsys/motor/motor.h``. Motor-type agnostic API
 with an opaque ``motor_t`` handle.
 
-- **State machine**: UNINIT, IDLE, ALIGN, RUN, STOP, STO, FAULT with
-  well-defined transitions.
-- **Commands**: ``motor_set_torque()``, ``motor_set_speed()``,
-  ``motor_set_position()``, ``motor_set_drive_mode()``.
-- **Lifecycle**: ``motor_init()``, ``motor_enable()``, ``motor_disable()``,
-  ``motor_estop()``.
-- **Safe Torque Off (STO)**: Dual-channel monitoring per IEC 61508 / ISO 13849.
-- **Parameter persistence**: Save/load via Zephyr settings subsystem.
-- **Callbacks**: State change and fault notifications.
+- **State machine**: ``UNINIT`` → ``IDLE`` → ``RUN`` (and ``FAULT`` from any
+  state). Planned: ``ALIGN``, ``STOP``, ``STO`` for safety-rated workflows.
+- **Lifecycle**: ``motor_self_test()``, ``motor_enable()``, ``motor_disable()``,
+  ``motor_estop()``, ``motor_clear_fault()``.
+- **Status / drive mode**: ``motor_get_status()``,
+  ``motor_set_drive_mode()`` (normal / coast; brake / regen reserved).
+- **Callbacks**: ``motor_register_callbacks()`` for state changes and fault
+  notifications.
 
-Controller Layer
-================
+Setpoints (current, speed, position, …) are **not** exposed on this header.
+They live in each algorithm's public header so the application picks the
+right command shape for the pipeline it instantiates.
 
-Defined in ``include/zephyr/motor_controller.h``. Implements multi-rate
-control loop scheduling with four rates:
+Algorithm Public APIs
+=====================
 
-- **Rate 0** (ISR, 20--100 kHz): Current loop -- Clarke/Park transforms,
-  PI regulators, SVPWM or 6-step commutation.
-- **Rate 1** (Thread, ~1 kHz): Speed loop -- PI control with anti-windup
-  and acceleration profiling (trapezoidal, S-curve).
-- **Rate 2** (Thread, ~100--500 Hz): Position loop -- P/PD control with
-  trajectory generation.
-- **Rate 3** (Thread, ~10--100 Hz): Supervision -- fault policy, thermal
-  derating, watchdog, state transitions.
+Each composable algorithm module exposes its own public header alongside its
+DT binding. Today the module ships one algorithm:
 
-Algorithm vtable (``motor_algo_ops``) supports: FOC, 6-step, open-loop,
-V/f scalar, and step/dir.
+- **DC current** -- ``include/zephyr/subsys/motor/algorithms/dc_current/motor_algo_dc_current.h``,
+  binding ``zephyr,motor-algorithm-dc-current``.
+  PI current regulator with anti-windup. Maps the signed PI output to
+  bidirectional full-bridge PWM (``duty[0] = (u + 1)/2``,
+  ``duty[1] = 1 - duty[0]``) so the actuator only needs to apply duty per leg.
+
+  Public API: ``motor_algo_dc_current_set_current``,
+  ``motor_algo_dc_current_get_state``, ``motor_algo_dc_current_set_pi_gains``,
+  ``motor_algo_dc_current_get_pi_gains``, ``motor_algo_dc_current_set_limits``,
+  ``motor_algo_dc_current_get_limits``.
+
+Future algorithms (FOC, 6-step, V/f scalar, step/dir) plug into the same
+pipeline infrastructure and ship their own public headers.
+
+Controller and Pipeline (internal)
+==================================
+
+Defined in ``include/zephyr/subsys/motor/motor_controller.h``,
+``motor_pipeline.h``, ``motor_block.h``. Surface mainly for algorithm/driver
+authors; application code does not touch it directly.
+
+- **Pipeline**: ordered list of ``motor_block`` callbacks. Each block declares
+  its target stage (today ``MOTOR_STAGE_INNER_ISR``; more stages reserved for
+  outer / supervisory work). Blocks expose ``entry`` (hot path),
+  ``set_params`` (precompute derived constants at init or after public API
+  parameter changes), and ``reset`` (clear integrators/state).
+- **Hot ISR (inner stage)**: runs from the actuator PWM-period interrupt with
+  an N-1 sampling cadence -- read the previous sample, advance the algorithm,
+  push new duty cycles, start the next ADC conversion. ZLI on STM32 (see
+  ``.cursor/rules/motor-hot-path.mdc`` for what is forbidden in this context).
+- **Slow timer**: each ``motor_actuator`` owns a Zephyr ``counter`` alarm
+  programmed to fire every ``slow-sample-div`` PWM periods (default 10). The
+  alarm signals the controller's slow thread, which performs work not allowed
+  in the ZLI ISR (e.g. fetching a Zephyr Sensor for angle). The pipeline
+  picks up the result on subsequent hot ticks.
+- **Sense bundle**: hot ISR fills a ``motor_sense_bundle`` (current array,
+  angle) and passes it as the block input. Algorithm authors only consume
+  the bundle, never raw devices.
 
 Sensor Backend -- Interface B
 =============================
 
-Defined in ``include/zephyr/motor_sensor.h``. Provides a vtable-based
-abstraction for feedback sensors with ISR-safe data paths.
+Defined in ``include/zephyr/drivers/motor/motor_sensor.h``. Vtable-based, with
+two logical channels today: ``CHAN_CURRENT`` (composite ADC array) and
+``CHAN_ANGLE`` (optional Zephyr Sensor feedback). Extension slots are reserved
+for future composites.
 
-- **Position/speed backends**: Quadrature encoder, Hall sensors, SPI absolute
-  encoder, resolver (SIN/COS), BEMF observer, HFI observer, step counter.
-- **Current sense backends**: 3-shunt, 2-shunt, single DC-link shunt,
-  StallGuard, none.
-- **Data layout**: HOT region (~24 bytes, one cache line) for ISR-copied
-  theta/omega/phase currents; COLD region for supervision-only data
-  (bus voltage, temperatures, faults).
+Built-in drivers:
+
+- ``zephyr,motor-sensor-stm32`` -- STM32G4 LL, injected ADC sequence,
+  software-triggered, JEOC ISR latches all ranks. ZLI-direct ISR.
+- ``zephyr,motor-sensor-esp32`` -- ESP32 family SAR ADC + digital DMA (GDMA
+  on S3/C3/H2, I2S- or SPI-linked DMA on ESP32 / ESP32-S2). EOF latches the
+  last block sample.
+
+ADC scaling (``vref / counts × amps-per-volt``) is **precomputed at init**
+from three DT properties on the sensor node and applied as a single
+multiplication per channel in the hot path:
+
+- ``adc-vref-mv`` -- full-scale reference voltage in mV (default 3300; on
+  ESP32 it follows the chosen ``adc-channel-attenuation-db``: ~1100 mV at
+  0 dB, ~1500 mV at 2.5 dB, ~2200 mV at 6 dB, ~3300 mV at 12 dB).
+- ``adc-resolution-bits`` -- 6/8/10/12 on STM32 (driver honors via LL),
+  fixed 12 on ESP32.
+- ``amps-per-volt-milli`` -- shunt + gain conversion.
+
+Calibration zeroes per-channel offsets so the channel can carry signed
+currents (e.g. unipolar shunt + bias network).
 
 Power Stage Backend -- Interface C
 ==================================
 
-Defined in ``include/zephyr/motor_actuator.h``. Abstracts the power
-electronics hardware.
+Defined in ``include/zephyr/drivers/motor/motor_actuator.h``. Duty array
+per leg in ``[0.0, 1.0]``; the algorithm is responsible for mapping its
+signed output to that range. No vector / sign-magnitude API -- each leg
+gets its own duty value.
 
-- **Topologies**: Half-bridge, full H-bridge, dual H-bridge (stepper),
-  3-phase inverter.
-- **Actuation**: Voltage vector (Valpha/Vbeta for SVPWM) or direct per-phase
-  duty cycles.
-- **Drive modes**: Normal, coast, brake, regenerative braking.
-- **Safety**: Hardware fault monitoring (nFAULT GPIO), STO arm/release with
-  dual-channel self-test.
-- **Control callback**: Fired from PWM period ISR for current-loop heartbeat.
+Built-in drivers:
+
+- ``zephyr,motor-stage-hbridge-stm32`` -- STM32G4 LL, 1..3 complementary
+  half-bridges (CHx + CHxN) on an advanced timer (TIM1/TIM8). Build-time
+  asserts reject non-advanced timers. Hardware dead-time via BDTR DTG.
+- ``zephyr,motor-stage-hbridge-espressif-mcpwm`` -- one MCPWM operator,
+  single half-bridge (gen_high + gen_low complementary). Multi-leg
+  full-bridge is planned (needs binding extension to multiple operators).
+
+Shared properties (``zephyr,motor-stage-hbridge-common``):
+
+- ``pwm-channels`` -- one timer channel per leg.
+- ``single-ended`` -- optional flag. When false (default), driver applies
+  the ``pinctrl-0`` ("complementary", 2·N pins). When true, driver applies
+  ``pinctrl-1`` ("single-ended", N HS pins only) -- the LS pin stays at
+  its hardware reset state, free for other use.
+- ``en-gpios`` -- optional gate driver ``EN`` pin, driven on enable and
+  released on disable.
+- ``nfault-gpios``, ``nsleep-gpios`` -- standard gate driver lines.
+- ``slow-timer``, ``slow-sample-div`` -- Zephyr counter wired for the
+  slow ISR (see Controller section).
+
+Drive modes: ``MOTOR_DRIVE_NORMAL`` and ``MOTOR_DRIVE_COAST`` today;
+``BRAKE`` / ``REGEN`` reserved.
 
 Subsystem Layer
 ===============
 
-Defined in ``include/zephyr/motor_subsys.h``. Manages multiple motor
-instances and coordinated operation.
+Defined in ``include/zephyr/subsys/motor/motor_subsys.h``. Top of the stack.
 
-- **Auto-init**: All DT-declared instances initialized via ``SYS_INIT()``.
-- **Discovery**: By DT label (``motor_subsys_get_by_label()``) or index.
-- **Motor groups**: Named sets of motors commanded atomically with zero
-  inter-motor skew.
-- **Group enable barrier**: Parallel alignment with all-RUN gate.
-- **Fault propagation**: Configurable per group -- estop-all, disable-all,
-  or isolate.
+- **DT auto-instantiation**: every ``zephyr,motor-controller`` node in the
+  devicetree is materialised by ``motor_subsys.c`` (no ``MOTOR_SUBSYS_DEFINE_DT``
+  in application code). The subsystem inspects the controller's
+  ``algorithm`` phandle compatible and instantiates the matching pipeline.
+- **Auto-init**: ``SYS_INIT()`` calls ``motor_subsys_init()`` after
+  POST_KERNEL device init when ``CONFIG_MOTOR_SUBSYS_AUTO_INIT=y``.
+- **Discovery**: ``motor_subsys_get_by_label()`` (DT node label),
+  ``motor_subsys_get_by_index()``, ``motor_subsys_count()``,
+  ``motor_subsys_label_get()``.
+- **Motor groups**: named sets of ``motor_t`` commanded as a unit;
+  ``motor_group_enable()`` arms each member and resolves when all reach
+  ``RUN`` (or any reaches ``FAULT``).
+- **Fault propagation**: ``MOTOR_GROUP_FAULT_ESTOP_ALL``,
+  ``MOTOR_GROUP_FAULT_DISABLE_ALL``, ``MOTOR_GROUP_FAULT_ISOLATE``.
 
 Supported Motor Types
 *********************
 
 .. list-table::
    :header-rows: 1
-   :widths: 25 20 30 20
+   :widths: 25 20 30 15 10
 
    * - Motor Type
      - Algorithm
      - Sensor
      - Power Stage
+     - Status
    * - DC Brushed PM
-     - ``openloop`` or ``foc``
-     - Encoder (optional) + 1-shunt
-     - H-bridge
+     - ``dc-current``
+     - 1- or 2-shunt + optional encoder
+     - Full-bridge (TIM1/TIM8)
+     - Implemented
    * - BLDC 6-step (Hall)
-     - ``6step``
-     - Hall x3 + 1/2-shunt
+     - ``6step`` (planned)
+     - Hall × 3 + shunt
      - 3-phase inverter
+     - Planned
    * - BLDC sensorless
-     - ``6step`` + sensorless
+     - ``6step`` + BEMF observer
      - BEMF observer + 2-shunt
      - 3-phase inverter
+     - Planned
    * - PMSM -- encoder
-     - ``foc``
+     - ``foc`` (planned)
      - Encoder/SPI ABS/resolver + 3-shunt
      - 3-phase inverter
+     - Planned
    * - PMSM -- sensorless
-     - ``foc`` (sensorless)
+     - ``foc`` + observer
      - BEMF + HFI observer + 3-shunt
      - 3-phase inverter
-   * - Stepper open-loop
-     - ``stepdir``
-     - Step counter + StallGuard
+     - Planned
+   * - Stepper
+     - ``stepdir`` (planned)
+     - Step counter / encoder
      - Dual H-bridge
-   * - Stepper closed-loop
-     - ``stepdir`` + position PID
-     - Encoder + 1-shunt
-     - Dual H-bridge
+     - Planned
    * - AC Induction -- V/f
-     - ``vf-scalar``
+     - ``vf-scalar`` (planned)
      - Tach/encoder (optional) + 3-shunt
      - 3-phase inverter
+     - Planned
    * - AC Induction -- FOC
-     - ``foc`` (rotor flux)
+     - ``foc`` (rotor flux, planned)
      - Encoder or MRAS observer + 3-shunt
      - 3-phase inverter
+     - Planned
 
-Complete devicetree overlay examples are provided in
-``samples/motor-control/examples.overlay``.
+Planned types use the same composable pipeline + per-algorithm public API
+pattern that ``dc-current`` follows today. Reference devicetree shapes are
+collected in ``samples/motor-control/examples.overlay`` for review.
 
 Devicetree Bindings
-********************
+*******************
 
-The following bindings are defined in ``dts/bindings/motor-control/``:
+In-tree bindings live under ``dts/bindings/motor-control/``:
 
-- ``zephyr,motor-controller`` -- Top-level composition node linking sensor,
-  actuator, algorithm, motor parameters, and loop rates.
-- ``zephyr,motor-sensor-encoder`` -- Quadrature encoder with phase current ADC.
-- ``zephyr,motor-sensor-hall`` -- Hall effect sensors (3-wire) with current ADC.
-- ``zephyr,motor-sensor-resolver`` -- SIN/COS resolver with current ADC.
-- ``zephyr,motor-sensor-sensorless`` -- BEMF/HFI observer with optional ADC.
-- ``zephyr,motor-stage-3ph-inverter`` -- 3-phase 6-switch inverter with
-  complementary PWM, dead-time, and fault/STO GPIOs.
-- ``zephyr,motor-stage-hbridge`` -- H-bridge (single or dual for stepper).
+- ``zephyr,motor-controller`` -- composition node: ``sensor``, ``actuator``,
+  and ``algorithm`` phandles. Materialised by the subsystem (no application
+  glue).
+- ``zephyr,motor-sensor-base`` -- abstract base: ``adc``, ``adc-channels``,
+  ``sync-actuator``, ``adc-vref-mv``, ``adc-resolution-bits``,
+  ``amps-per-volt-milli``, optional ``feedback-sensor``.
+- ``zephyr,motor-sensor-stm32`` -- STM32 LL injected ADC.
+- ``zephyr,motor-sensor-esp32`` -- ESP32 SAR ADC digital + DMA.
+- ``zephyr,motor-stage-hbridge-common`` -- abstract base: ``pwm-channels``,
+  ``pwm-frequency``, ``slow-timer``, ``slow-sample-div``, optional
+  ``single-ended``, ``en-gpios``, ``nfault-gpios``, ``nsleep-gpios``,
+  ``sto-gpios``, ``deadtime-ns``.
+- ``zephyr,motor-stage-hbridge-stm32`` -- STM32 advanced timer
+  (``st,pwm-timer``, ``trgo-source``).
+- ``zephyr,motor-stage-hbridge-espressif-mcpwm`` -- ESP32 MCPWM operator.
+- ``zephyr,motor-algorithm-dc-current`` -- PI tuning + limits
+  (``dc-current-kp-milli``, ``dc-current-ki-milli``, ``dc-current-out-min-milli``,
+  ``dc-current-out-max-milli``, ``i-max-ma``).
+
+Samples
+*******
+
+- ``samples/motor_shell`` -- interactive shell on the console UART for bench
+  bring-up: list instances, select, self-test, enable, set current, read
+  status, retune PI / limits at runtime. STM32 LL on NUCLEO-G474RE (TIM1
+  complementary, ADC1 injected). See ``samples/motor_shell/README.rst``.
+- ``samples/motor_trapezoid`` -- shell-started trapezoidal current trajectory
+  (ramp / hold / ramp-down / dwell, then mirrored negative half) using the
+  algorithm's ``i-max-ma`` as peak. Same hardware as ``motor_shell``. See
+  ``samples/motor_trapezoid/README.rst``.
+- ``samples/motor-control/examples.overlay`` -- reference DTS overlays for
+  future motor configurations (PMSM/FOC, BLDC/6-step, stepper, …). No
+  application code yet -- documents the binding shapes.
+
+Hot Path Performance Rule
+*************************
+
+Real-time correctness depends on keeping the inner ISR cheap. The rule in
+``.cursor/rules/motor-hot-path.mdc`` is enforced across this module:
+
+- No division, transcendentals, or kernel API in the hot path.
+- Quantities derived only from DT or ``set_params`` input are **precomputed**
+  in the algorithm/driver data struct at init and re-read in the ISR.
+  Examples:
+
+  - ``motor_algo_dc_current_data::ki_dt`` (= ``pi.ki × control_loop_dt_s``)
+    cached so the hot path only does one multiplication for the integral
+    term.
+  - ``motor_actuator_stm32_data::max_duty`` (= ``ARR + 1``) cached at init
+    so ``set_duty`` skips an MMIO read of ``TIMx_ARR`` every ISR.
+  - ``motor_sensor_*_data::amps_per_count`` (= ``vref/counts × amps_per_volt``)
+    cached so the ADC ISR/EOF path produces amps with a single multiply per
+    channel, no division, no nested scaling.
+
+Algorithm and driver authors are expected to follow the same pattern.
 
 Getting Started
 ***************
@@ -275,24 +410,40 @@ Building and Testing
 
 .. code-block:: bash
 
-   # Build for a specific board with an overlay
-   west build -b <board> samples/motor-control -- \
-     -DDTC_OVERLAY_FILE=samples/motor-control/examples.overlay
+   export ZEPHYR_BASE="$PWD/deps/zephyr"
+   export ZEPHYR_EXTRA_MODULES="$PWD"
 
-   # Run the test suite via Twister
-   west twister -G --testsuite-root . --tag motor_control
+   # Build a sample for NUCLEO-G474RE
+   west build -b nucleo_g474re samples/motor_shell
+   west build -b nucleo_g474re samples/motor_trapezoid
+
+   # Run the test suite via Twister on native_sim (algorithm + pipeline +
+   # subsystem unit tests run blackbox against fake sensor/actuator devices).
+   ./tests/run_twister.sh -T "$PWD/tests" -p native_sim/native/64
 
 Project Status
 **************
 
 This module is a **proof of concept**. Current state:
 
-- API headers defining the full 5-layer architecture are **complete**.
-- Devicetree bindings for all sensor and power stage types are **defined**.
-- Sample DTS overlays for 4 motor configurations are **provided**.
-- CI/CD pipeline (GitHub Actions + Zephyr Twister) is **operational**.
-- Implementation code (``subsys/*.c``, drivers) is **not yet written**.
-- The API **may change** as the design is validated on real hardware.
+- Architecture, layered headers, and DT bindings -- **complete** (subject to
+  API tweaks while validating on hardware).
+- ``dc-current`` algorithm with PI + anti-windup, complementary full-bridge
+  output -- **implemented**.
+- In-tree sensor drivers: STM32 LL injected ADC, ESP32 SAR + DMA --
+  **implemented**.
+- In-tree power stage drivers: STM32 advanced-timer half/full-bridge,
+  ESP32 MCPWM half-bridge -- **implemented**. ESP32 multi-operator
+  full-bridge is **planned**.
+- Subsystem with DT auto-instantiation, motor groups, fault propagation
+  policy -- **implemented**.
+- Samples (``motor_shell``, ``motor_trapezoid``) build for NUCLEO-G474RE --
+  **green**.
+- Test suite (algorithm, pipeline, subsystem, API) on ``native_sim`` --
+  **green**.
+- STO arm/release, ``ALIGN``/``STOP`` states, multi-rate outer loops
+  (speed / position / supervision), and additional motor type algorithms --
+  **planned**.
 
 License
 *******

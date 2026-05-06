@@ -1,0 +1,16 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# From repo root with ZEPHYR_EXTRA_MODULES: west twister -T samples/motor_trapezoid
+
+sample:
+  description: Motor control trapezoidal current trajectory (STM32 LL, NUCLEO-G474RE)
+  name: motor_trapezoid
+common:
+  tags: motor
+tests:
+  samples.motor.motor_trapezoid:
+    build_only: true
+    extra_args: CONF_FILE=prj.conf
+    integration_platforms:
+      - nucleo_g474re

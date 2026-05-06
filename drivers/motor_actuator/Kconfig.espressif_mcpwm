@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Freedom Veiculos Eletricos
+# SPDX-License-Identifier: UNLICENSED
+
+config MOTOR_STAGE_HBRIDGE_ESPRESSIF_MCPWM
+	bool "Espressif MCPWM H-bridge (zephyr,motor-stage-hbridge-espressif-mcpwm)"
+	depends on SOC_FAMILY_ESPRESSIF_ESP32
+	depends on COUNTER
+	depends on GPIO
+	select PINCTRL
+	help
+	  Full-bridge using MCPWM low-level HAL. Requires an espressif,esp32-mcpwm node
+	  referenced by the motor stage (mcpwm phandle).
+
+config MOTOR_STAGE_HBRIDGE_ESPRESSIF_MCPWM_INIT_PRIORITY
+	int "Init priority for zephyr,motor-stage-hbridge-espressif-mcpwm"
+	default 45
+	depends on MOTOR_STAGE_HBRIDGE_ESPRESSIF_MCPWM
+	help
+	  Run before encoder or other drivers that sync to MCPWM timing.

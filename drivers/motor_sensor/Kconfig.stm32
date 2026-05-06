@@ -1,0 +1,24 @@
+# Copyright (c) 2026 Freedom Veiculos Eletricos
+# SPDX-License-Identifier: UNLICENSED
+
+# STM32: LL ADC injected sequence, software trigger (zephyr,motor-sensor-stm32).
+
+config MOTOR_SENSOR_STM32
+	bool "STM32 motor sensor (zephyr,motor-sensor-stm32)"
+	depends on SOC_SERIES_STM32G4X
+	select ZERO_LATENCY_IRQS
+	help
+	  Current sense via LL ADC injected group; JEOC ISR latches samples.
+
+config MOTOR_SENSOR_STM32_INIT_PRIORITY
+	int "Init priority for zephyr,motor-sensor-stm32"
+	default 46
+	depends on MOTOR_SENSOR_STM32
+
+config MOTOR_STM32_ADC_IRQ_PRIORITY
+	int "Default NVIC priority for ADC JEOC ISR (STM32 sensor)"
+	default 2
+	range 0 15
+	depends on MOTOR_SENSOR_STM32
+	help
+	  Used when zephyr,adc-irq-priority is not set in devicetree.

@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Freedom Veiculos Eletricos
+# SPDX-License-Identifier: UNLICENSED
+
+# Espressif: SAR ADC digital + GDMA or I2S/SPI-linked DMA (legacy SoCs).
+
+config MOTOR_SENSOR_ESP32
+	bool "Espressif motor sensor (zephyr,motor-sensor-esp32)"
+	depends on SOC_FAMILY_ESPRESSIF_ESP32
+	depends on GPIO
+	select DMA if DT_HAS_ESPRESSIF_ESP32_GDMA_ENABLED
+	depends on ADC
+	help
+	  Current sense via SAR ADC digital mode. GDMA SoCs use the ADC DMA channel
+	  from devicetree; ESP32/ESP32-S2 use I2S/SPI EOF like Zephyr adc_esp32_dma.
+	  Requires SOC_ADC_DIG_CTRL_SUPPORTED (enforced in driver).
+
+config MOTOR_SENSOR_ESP32_INIT_PRIORITY
+	int "Init priority for zephyr,motor-sensor-esp32"
+	default 46
+	depends on MOTOR_SENSOR_ESP32
+
+config MOTOR_ESP32_MCPWM_SYNC_IRQ_PRIORITY
+	int "esp_intr_alloc priority for MCPWM TEZ/TEP ISR (motor_sensor_esp32)"
+	default 2
+	range 1 15
+	depends on MOTOR_SENSOR_ESP32
+	help
+	  Used only when zephyr,mcpwm-sync-irq-priority is not set in devicetree.

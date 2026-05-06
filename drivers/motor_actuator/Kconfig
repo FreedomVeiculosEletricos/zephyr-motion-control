@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Freedom Veiculos Eletricos
+# SPDX-License-Identifier: UNLICENSED
+
+# SoC-specific motor actuators (STM32 LL, Espressif MCPWM, …).
+
+menu "Motor actuators"
+
+rsource "Kconfig.stm32"
+rsource "Kconfig.espressif_mcpwm"
+
+endmenu

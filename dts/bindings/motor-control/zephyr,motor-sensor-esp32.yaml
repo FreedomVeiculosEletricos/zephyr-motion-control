@@ -1,0 +1,45 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Espressif ESP32 family: SAR ADC digital + EOF latch (GDMA on S3/C3/H2…, or
+  I2S/SPI-linked DMA on ESP32 / ESP32-S2). adc-channels must have exactly one
+  entry. Requires SOC_ADC_DIG_CTRL_SUPPORTED; GDMA SoCs need adc ``dmas`` in DTS.
+
+compatible: "zephyr,motor-sensor-esp32"
+
+include: "zephyr,motor-sensor-base.yaml"
+
+properties:
+  adc-channel-attenuation-db:
+    type: int
+    default: 11
+    description: SAR attenuation (0, 2, 6, 11 dB).
+
+  digi-block-samples:
+    type: int
+    default: 1
+
+  adc-digi-sample-freq-hz:
+    type: int
+    default: 20000
+
+  zephyr,mcpwm-sync-irq-priority:
+    type: int
+    description: MCPWM TEZ/TEP ISR priority if used.
+
+  mcpwm-sync:
+    type: phandle
+    required: true
+    description: MCPWM instance (register base).
+
+  sync-timer-id:
+    type: int
+    default: 0
+
+  sync-edge:
+    type: string
+    default: "tez"
+    enum:
+      - tez
+      - tep

@@ -1,0 +1,59 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+include: base.yaml
+
+properties:
+  adc:
+    type: phandle
+    required: true
+    description: |
+      SoC ADC block used by the in-tree driver (HAL/LL), not the Zephyr adc API.
+
+  adc-channels:
+    type: array
+    required: true
+    description: |
+      Per-SoC channel indices (e.g. STM32 LL decimal channel id per rank order).
+      Number of entries is the number of composite current channels.
+
+  sync-actuator:
+    type: phandle
+    required: true
+    description: Power-stage device paired with this sensor (timing / coordination).
+
+  feedback-sensor:
+    type: phandle
+    required: false
+    description: |
+      Optional Zephyr sensor device for angle (e.g. SENSOR_CHAN_ROTATION).
+      Requires CONFIG_SENSOR. Updated from thread context via
+      motor_sensor_start_sample(MOTOR_SENSOR_CHAN_ANGLE); get_sample
+      for angle still return the last latched value (ISR-safe read).
+
+  amps-per-volt-milli:
+    type: int
+    default: 1000
+    description: Current scale A/V = value / 1000 (default 1.0 A/V).
+
+  adc-vref-mv:
+    type: int
+    default: 3300
+    description: |
+      ADC full-scale reference voltage in millivolts. Combined with
+      adc-resolution-bits and amps-per-volt-milli, the driver precomputes a
+      single amps-per-count scaling factor used in the hot path — so this
+      value must match the actual analog front-end (regulator Vref on
+      STM32, or the full-scale voltage implied by adc-channel-attenuation-db
+      on ESP32, e.g. ~1100 mV at 0 dB, ~1500 mV at 2.5 dB, ~2200 mV at
+      6 dB, ~3300 mV at 12 dB).
+
+  adc-resolution-bits:
+    type: int
+    default: 12
+    description: |
+      ADC resolution in bits (counts = 1 << bits). Drivers that allow
+      runtime configuration of the ADC peripheral honor this value; on
+      SoCs where the resolution is fixed the value is informational and
+      the driver still uses it to derive the counts factor — pick the
+      value that matches the SoC's native resolution.

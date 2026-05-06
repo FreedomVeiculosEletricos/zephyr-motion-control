@@ -1,0 +1,16 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  STM32: injected ADC sequence, software trigger from motor_sensor_start_sample.
+  JEOC ISR latches all ranks; optional Zephyr sensor for angle via feedback-sensor.
+
+compatible: "zephyr,motor-sensor-stm32"
+
+include: "zephyr,motor-sensor-base.yaml"
+
+properties:
+  zephyr,adc-irq-priority:
+    type: int
+    required: false
+    description: NVIC priority for ADC interrupt (default Kconfig).

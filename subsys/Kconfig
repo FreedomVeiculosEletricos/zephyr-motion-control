@@ -1,8 +1,61 @@
 # Copyright (c) 2026 Freedom Veiculos Eletricos
 # SPDX-License-Identifier: Apache-2.0
 
-menu "Subsystems and OS Services"
+menu "Motor control subsystem"
 
-#rsource "moduleFoo/Kconfig"
+config MOTOR_CONTROL_TEST_API
+	bool "Motor control subsystem for ZTEST (fake devices, no hardware drivers)"
+	depends on ZTEST
+	default n
+	help
+	  Relaxes MOTOR_CONTROL_LIB dependencies so tests can link motor_ctrl with
+	  in-tree fake devices only. Do not enable in production firmware.
+
+config MOTOR_CONTROL_LIB
+	bool "Motor controller core and application API"
+	default y
+	depends on MOTOR_CONTROL_TEST_API || \
+		   (((MOTOR_STAGE_HBRIDGE_STM32 || MOTOR_STAGE_HBRIDGE_ESPRESSIF_MCPWM) && \
+		    (MOTOR_SENSOR_STM32 || MOTOR_SENSOR_ESP32)))
+	help
+	  Builds motor_ctrl, motor_* API, and the dc current algorithm backend.
+
+config MOTOR_SUBSYS
+	bool "Motor multi-instance DT registration (motor_subsys_* API)"
+	depends on MOTOR_CONTROL_LIB
+	default y
+	help
+	  Iterable MOTOR_SUBSYS_DEFINE entries, motor_subsys_init(), and
+	  motor_subsys_get_by_label() / get_by_index().
+
+if MOTOR_SUBSYS
+
+config MOTOR_SUBSYS_AUTO_INIT
+	bool "Invoke motor_subsys_init() from SYS_INIT"
+	default y
+	help
+	  Runs after kernel and device init so sensor/actuator devices are ready.
+
+config MOTOR_SUBSYS_INIT_PRIORITY
+	int "motor_subsys_init SYS_INIT priority (APPLICATION level)"
+	default 99
+	range 0 99999
+	depends on MOTOR_SUBSYS_AUTO_INIT
+
+config MOTOR_MAX_INSTANCES
+	int "Maximum registered motor instances"
+	default 8
+	range 1 32
+
+config MOTOR_CONTROL_SHELL
+	bool "Motor shell (list, use, current, enable, DC pi/limits, …)"
+	depends on SHELL
+	depends on MOTOR_SUBSYS
+	default n
+	help
+	  Register interactive ``motor`` commands for bench tuning. Requires
+	  @kconfig{CONFIG_MOTOR_SUBSYS} and a console.
+
+endif # MOTOR_SUBSYS
 
 endmenu
