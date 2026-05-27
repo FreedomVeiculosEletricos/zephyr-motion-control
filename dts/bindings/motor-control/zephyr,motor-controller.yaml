@@ -38,4 +38,5 @@ properties:
     required: true
     description: |
       Algorithm instance (e.g. a node with compatible
-      "zephyr,motor-algorithm-dc-current" and tuning properties).
+      "zephyr,motor-algorithm-dc-current" or
+      "zephyr,motor-algorithm-adrc-current" and tuning properties).
