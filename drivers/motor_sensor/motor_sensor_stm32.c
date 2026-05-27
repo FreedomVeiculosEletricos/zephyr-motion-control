@@ -11,9 +11,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <stm32g4xx.h>
-#include <stm32g4xx_ll_adc.h>
-#include <stm32g4xx_ll_bus.h>
+#include <stm32_ll_adc.h>
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -25,6 +23,16 @@
 #include <zephyr/drivers/sensor.h>
 #endif
 #include <zephyr/sys/util.h>
+
+#if defined(LL_ADC_SAMPLINGTIME_6CYCLES_5)
+#define MOTOR_STM32_ADC_SAMPLE_TIME LL_ADC_SAMPLINGTIME_6CYCLES_5
+#elif defined(LL_ADC_SAMPLINGTIME_8CYCLES_5)
+#define MOTOR_STM32_ADC_SAMPLE_TIME LL_ADC_SAMPLINGTIME_8CYCLES_5
+#elif defined(LL_ADC_SAMPLINGTIME_12CYCLES_5)
+#define MOTOR_STM32_ADC_SAMPLE_TIME LL_ADC_SAMPLINGTIME_12CYCLES_5
+#else
+#error "Unsupported STM32 LL ADC sampling time macro"
+#endif
 
 static int motor_sensor_stm32_check_adc_pwm_margin(const struct device *sync_actuator,
 						   uint8_t n_adc_channels)
@@ -87,18 +95,41 @@ struct motor_sensor_stm32_data {
 	void *measurement_done_user_data;
 };
 
-static uint32_t stm32_ll_adc_resolution_from_bits(uint8_t bits)
+static int stm32_ll_adc_resolution_from_bits(uint8_t bits, uint32_t *out)
 {
 	switch (bits) {
+#ifdef LL_ADC_RESOLUTION_6B
 	case 6U:
-		return LL_ADC_RESOLUTION_6B;
+		*out = LL_ADC_RESOLUTION_6B;
+		return 0;
+#endif
+#ifdef LL_ADC_RESOLUTION_8B
 	case 8U:
-		return LL_ADC_RESOLUTION_8B;
+		*out = LL_ADC_RESOLUTION_8B;
+		return 0;
+#endif
+#ifdef LL_ADC_RESOLUTION_10B
 	case 10U:
-		return LL_ADC_RESOLUTION_10B;
+		*out = LL_ADC_RESOLUTION_10B;
+		return 0;
+#endif
+#ifdef LL_ADC_RESOLUTION_12B
 	case 12U:
+		*out = LL_ADC_RESOLUTION_12B;
+		return 0;
+#endif
+#ifdef LL_ADC_RESOLUTION_14B
+	case 14U:
+		*out = LL_ADC_RESOLUTION_14B;
+		return 0;
+#endif
+#ifdef LL_ADC_RESOLUTION_16B
+	case 16U:
+		*out = LL_ADC_RESOLUTION_16B;
+		return 0;
+#endif
 	default:
-		return LL_ADC_RESOLUTION_12B;
+		return -EINVAL;
 	}
 }
 
@@ -108,13 +139,6 @@ static const uint32_t inj_rank[4] = {
 	LL_ADC_INJ_RANK_3,
 	LL_ADC_INJ_RANK_4,
 };
-
-static void adc_enable_rcc(ADC_TypeDef *adc)
-{
-	if ((adc == ADC1) || (adc == ADC2)) {
-		LL_AHB2_GRP1_EnableClock(LL_AHB2_GRP1_PERIPH_ADC12);
-	}
-}
 
 static uint32_t inj_seq_len_from_n(uint8_t n)
 {
@@ -136,27 +160,41 @@ static int adc_inj_configure(ADC_TypeDef *adc, const uint32_t *ch_decimal, uint8
 			     uint8_t resolution_bits)
 {
 	uint8_t i;
+	uint32_t ll_resolution;
 
 	if ((adc == NULL) || (ch_decimal == NULL) || (n == 0U) || (n > 4U)) {
 		return -EINVAL;
 	}
-
-	adc_enable_rcc(adc);
+	if (stm32_ll_adc_resolution_from_bits(resolution_bits, &ll_resolution) != 0) {
+		return -EINVAL;
+	}
 
 	LL_ADC_SetCommonClock(__LL_ADC_COMMON_INSTANCE(adc), LL_ADC_CLOCK_ASYNC_DIV1);
 	LL_ADC_DisableDeepPowerDown(adc);
 	LL_ADC_EnableInternalRegulator(adc);
 	k_busy_wait(LL_ADC_DELAY_INTERNAL_REGUL_STAB_US);
+#if defined(LL_ADC_CALIB_OFFSET)
+	LL_ADC_StartCalibration(adc, LL_ADC_CALIB_OFFSET, LL_ADC_SINGLE_ENDED);
+#elif defined(LL_ADC_SINGLE_ENDED)
 	LL_ADC_StartCalibration(adc, LL_ADC_SINGLE_ENDED);
+#else
+	LL_ADC_StartCalibration(adc);
+#endif
 	while (LL_ADC_IsCalibrationOnGoing(adc) != 0UL) {
 	}
 	LL_ADC_Disable(adc);
 	while (LL_ADC_IsDisableOngoing(adc)) {
 	}
 
-	LL_ADC_SetResolution(adc, stm32_ll_adc_resolution_from_bits(resolution_bits));
+	LL_ADC_SetResolution(adc, ll_resolution);
+#if defined(CONFIG_SOC_SERIES_STM32H7X)
+#if defined(LL_ADC_RIGHT_BIT_SHIFT_NONE)
+	LL_ADC_SetDataRightShift(adc, LL_ADC_RIGHT_BIT_SHIFT_NONE);
+#endif
+#else
 	LL_ADC_SetDataAlignment(adc, LL_ADC_DATA_ALIGN_RIGHT);
 	LL_ADC_SetLowPowerMode(adc, LL_ADC_LP_MODE_NONE);
+#endif
 	LL_ADC_REG_SetOverrun(adc, LL_ADC_REG_OVR_DATA_OVERWRITTEN);
 	LL_ADC_REG_SetSequencerLength(adc, LL_ADC_REG_SEQ_SCAN_DISABLE);
 
@@ -169,7 +207,7 @@ static int adc_inj_configure(ADC_TypeDef *adc, const uint32_t *ch_decimal, uint8
 		uint32_t ch = __LL_ADC_DECIMAL_NB_TO_CHANNEL(ch_decimal[i]);
 
 		LL_ADC_INJ_SetSequencerRanks(adc, inj_rank[i], ch);
-		LL_ADC_SetChannelSamplingTime(adc, ch, LL_ADC_SAMPLINGTIME_6CYCLES_5);
+		LL_ADC_SetChannelSamplingTime(adc, ch, MOTOR_STM32_ADC_SAMPLE_TIME);
 	}
 
 	LL_ADC_Enable(adc);
@@ -385,16 +423,18 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 };
 
 #define ADC_FROM_PHANDLE(inst) ((ADC_TypeDef *)DT_REG_ADDR(DT_INST_PHANDLE(inst, adc)))
+#define SENSOR_STM32_ADC_IRQN(inst) DT_IRQ_BY_IDX(DT_INST_PHANDLE(inst, adc), 0, irq)
+#define SENSOR_STM32_ADC_IRQ_PRIO(inst)                                                         \
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, zephyr_adc_irq_priority),                      \
+		    (DT_INST_PROP(inst, zephyr_adc_irq_priority)),                              \
+		    (COND_CODE_1(DT_IRQ_HAS_CELL(DT_INST_PHANDLE(inst, adc), priority),         \
+				 (DT_IRQ_BY_IDX(DT_INST_PHANDLE(inst, adc), 0, priority)),         \
+				 (CONFIG_MOTOR_STM32_ADC_IRQ_PRIORITY))))
 
 #define SENSOR_STM32_DEFINE(inst)                                                                  \
 	BUILD_ASSERT(DT_INST_PROP_LEN(inst, adc_channels) >= 1);                                     \
 	BUILD_ASSERT(DT_INST_PROP_LEN(inst, adc_channels) <= MOTOR_SENSOR_CURRENT_MAX);              \
 	static const uint32_t motor_sensor_stm32_adc_ch_##inst[] = DT_INST_PROP(inst, adc_channels); \
-	BUILD_ASSERT(DT_INST_PROP(inst, adc_resolution_bits) == 6 ||                              \
-			     DT_INST_PROP(inst, adc_resolution_bits) == 8 ||                       \
-			     DT_INST_PROP(inst, adc_resolution_bits) == 10 ||                      \
-			     DT_INST_PROP(inst, adc_resolution_bits) == 12,                        \
-		     "adc-resolution-bits must be one of 6, 8, 10, 12 on STM32");                  \
 	static const struct motor_sensor_stm32_config motor_sensor_stm32_cfg_##inst = {            \
 		.adc = ADC_FROM_PHANDLE(inst),                                                     \
 		.sync_actuator = DEVICE_DT_GET(DT_INST_PHANDLE(inst, sync_actuator)),              \
@@ -447,12 +487,11 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 			return err;                                                                \
 		}                                                                                  \
 		BUILD_ASSERT(DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) == 1U,                         \
-			     "motor_sensor_stm32: single ADC1_2 IRQ bundle");                      \
-		IRQ_DIRECT_CONNECT(ADC1_2_IRQn,                                                  \
-				   DT_INST_PROP_OR(inst, zephyr_adc_irq_priority,                   \
-						   CONFIG_MOTOR_STM32_ADC_IRQ_PRIORITY),            \
+			     "motor_sensor_stm32: only one instance is currently supported");       \
+		IRQ_DIRECT_CONNECT(SENSOR_STM32_ADC_IRQN(inst),                                 \
+				   SENSOR_STM32_ADC_IRQ_PRIO(inst),                                  \
 				   motor_sensor_stm32_adc_isr_##inst, IRQ_ZERO_LATENCY);          \
-		irq_enable(ADC1_2_IRQn);                                                         \
+		irq_enable(SENSOR_STM32_ADC_IRQN(inst));                                         \
 		return 0;                                                                          \
 	}                                                                                          \
 	DEVICE_DT_DEFINE(DT_DRV_INST(inst), motor_sensor_stm32_dev_init_##inst, NULL,              \
