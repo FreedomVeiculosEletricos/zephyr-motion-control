@@ -25,6 +25,15 @@ Build (NUCLEO-G474RE, STM32 LL)
    west build -b nucleo_g474re zephyr-motion-control/samples/motor_shell -- \
      -DZEPHYR_EXTRA_MODULES=zephyr-motion-control
 
+To exercise the ADRC current algorithm with the same sample, append an extra
+overlay:
+
+.. code-block:: shell
+
+   west build -b nucleo_g474re zephyr-motion-control/samples/motor_shell -- \
+     -DZEPHYR_EXTRA_MODULES=zephyr-motion-control \
+     -DEXTRA_DTC_OVERLAY_FILE=boards/nucleo_g474re_adrc.overlay
+
 Use a **Nix devshell** (``nix develop``) for Zephyr Python ≥3.12 and toolchains.
 See the repo **tests/run_twister.sh** comment for ``PATH`` if the host
 ``cmake``/``python3`` shadow the Nix environment.
@@ -38,6 +47,12 @@ Use ``uart`` on the NUCLEO ST-Link VCP, then e.g.::
   uart:~$ motor current 0.1
   uart:~$ motor status
   uart:~$ motor pi 0.5 2000 0
+
+For ADRC tuning::
+
+  uart:~$ motor adrc 1.0 1.0 2.0 100.0 1
+  uart:~$ motor current 0.1
+  uart:~$ motor status
 
 Hardware
 ---------

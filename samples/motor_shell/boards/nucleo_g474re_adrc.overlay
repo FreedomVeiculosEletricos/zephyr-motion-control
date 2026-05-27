@@ -1,0 +1,19 @@
+/*
+ * Copyright (c) 2026 Zephyr Motor Control Contributors
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Extra overlay to switch motor_shell from dc-current to adrc-current.
+ * Use together with boards/nucleo_g474re.overlay.
+ */
+
+&motor_algo_dc_brushed {
+	compatible = "zephyr,motor-algorithm-adrc-current";
+
+	adrc-current-kp-milli = <1000>;
+	adrc-current-b0-milli = <1000>;
+	adrc-current-beta1-milli = <2000>;
+	adrc-current-beta2-milli = <100000>;
+	adrc-current-out-min-milli = <(-1000)>;
+	adrc-current-out-max-milli = <1000>;
+	i-max-ma = <3000>;
+};
