@@ -1,0 +1,34 @@
+/ {
+	adrc_current_motor: motor-controller {
+		compatible = "zephyr,motor-controller";
+		status = "okay";
+
+		sensor = <&adrc_current_sensor>;
+		actuator = <&adrc_current_actuator>;
+		algorithm = <&adrc_current_algo>;
+	};
+
+	adrc_current_algo: motor-algorithm-adrc-current {
+		compatible = "zephyr,motor-algorithm-adrc-current";
+		status = "okay";
+
+		adrc-current-kp-milli = <1000>;
+		adrc-current-b0-milli = <1000>;
+		adrc-current-beta1-milli = <0>;
+		adrc-current-beta2-milli = <0>;
+		adrc-current-out-min-milli = <(-1000)>;
+		adrc-current-out-max-milli = <1000>;
+		i-max-ma = <5000>;
+	};
+
+	adrc_current_sensor: motor-test-sensor {
+		compatible = "zephyr,motor-test-sensor";
+		status = "okay";
+	};
+
+	adrc_current_actuator: motor-test-actuator {
+		compatible = "zephyr,motor-test-actuator";
+		status = "okay";
+		pwm-frequency = <20000>;
+	};
+};
