@@ -18,7 +18,8 @@ config MOTOR_CONTROL_LIB
 		   (((MOTOR_STAGE_HBRIDGE_STM32 || MOTOR_STAGE_HBRIDGE_ESPRESSIF_MCPWM) && \
 		    (MOTOR_SENSOR_STM32 || MOTOR_SENSOR_ESP32)))
 	help
-	  Builds motor_ctrl, motor_* API, and the dc current algorithm backend.
+	  Builds motor_ctrl, motor_* API, and in-tree algorithm backends
+	  (dc-current and adrc-current).
 
 config MOTOR_SUBSYS
 	bool "Motor multi-instance DT registration (motor_subsys_* API)"

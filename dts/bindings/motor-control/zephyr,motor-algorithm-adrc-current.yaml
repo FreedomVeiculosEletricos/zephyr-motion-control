@@ -1,0 +1,47 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Linear ADRC current loop for brushed DC / single-axis current control with
+  a 2-state LESO (z1, z2). Referenced from zephyr,motor-controller via the
+  ``algorithm`` phandle.
+
+compatible: "zephyr,motor-algorithm-adrc-current"
+
+include: base.yaml
+
+properties:
+  adrc-current-kp-milli:
+    type: int
+    default: 1000
+    description: Proportional gain Kp × 1000.
+
+  adrc-current-b0-milli:
+    type: int
+    default: 1000
+    description: Plant gain estimate b0 × 1000. Must be > 0.
+
+  adrc-current-beta1-milli:
+    type: int
+    default: 2000
+    description: LESO beta1 × 1000.
+
+  adrc-current-beta2-milli:
+    type: int
+    default: 100000
+    description: LESO beta2 × 1000.
+
+  adrc-current-out-min-milli:
+    type: int
+    default: -1000
+    description: Normalised control lower limit × 1000 (-1000 = -1.0).
+
+  adrc-current-out-max-milli:
+    type: int
+    default: 1000
+    description: Normalised control upper limit × 1000 (1000 = 1.0).
+
+  i-max-ma:
+    type: int
+    required: true
+    description: Software current limit in mA.

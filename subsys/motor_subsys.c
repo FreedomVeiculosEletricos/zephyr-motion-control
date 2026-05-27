@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "motor_algo_adrc_current_priv.h"
 #include "motor_algo_dc_current_priv.h"
 #include "motor_ctrl_priv.h"
 
@@ -26,6 +27,7 @@
 #define MOTOR_SUBSYS_DT_LABELS_NAME(node_id) UTIL_CAT(motor_subsys_labels_, DT_NODE_HASH(node_id))
 #define MOTOR_SUBSYS_DT_CTRL_NAME(node_id) UTIL_CAT(motor_ctrl_, DT_NODE_HASH(node_id))
 #define MOTOR_SUBSYS_DT_DC_NAME(node_id) UTIL_CAT(motor_dc_, DT_NODE_HASH(node_id))
+#define MOTOR_SUBSYS_DT_ADRC_NAME(node_id) UTIL_CAT(motor_adrc_, DT_NODE_HASH(node_id))
 #define MOTOR_SUBSYS_DT_BLOCKS_NAME(node_id) UTIL_CAT(motor_blocks_, DT_NODE_HASH(node_id))
 #define MOTOR_SUBSYS_DT_PIPELINE_NAME(node_id) UTIL_CAT(motor_pipeline_, DT_NODE_HASH(node_id))
 #define MOTOR_SUBSYS_DT_ENTRY_NAME(node_id) UTIL_CAT(motor_entry_, DT_NODE_HASH(node_id))
@@ -53,11 +55,38 @@
 			    &MOTOR_SUBSYS_DT_PIPELINE_NAME(node_id),                                 \
 			    &MOTOR_SUBSYS_DT_DC_NAME(node_id), MOTOR_SUBSYS_DT_LABELS_NAME(node_id)[0]);
 
+#define MOTOR_SUBSYS_DT_DEFINE_ADRC_CURRENT(node_id)                                                \
+	BUILD_ASSERT(DT_NUM_NODELABELS(node_id) > 0,                                                \
+		     "zephyr,motor-controller nodes must have a node label");                       \
+	static const char *const MOTOR_SUBSYS_DT_LABELS_NAME(node_id)[] =                            \
+		DT_NODELABEL_STRING_ARRAY(node_id);                                                  \
+	static struct motor_ctrl MOTOR_SUBSYS_DT_CTRL_NAME(node_id);                                  \
+	static struct motor_algo_adrc_current_data MOTOR_SUBSYS_DT_ADRC_NAME(node_id) =               \
+		MOTOR_ADRC_CURRENT_DATA_INITIALIZER(node_id);                                        \
+	static struct motor_block *const MOTOR_SUBSYS_DT_BLOCKS_NAME(node_id)[] = {                   \
+		&MOTOR_SUBSYS_DT_ADRC_NAME(node_id).base,                                           \
+	};                                                                                           \
+	static struct motor_pipeline MOTOR_SUBSYS_DT_PIPELINE_NAME(node_id) = {                       \
+		.name = "adrc_current",                                                               \
+		.blocks = MOTOR_SUBSYS_DT_BLOCKS_NAME(node_id),                                      \
+		.n_blocks = 1U,                                                                      \
+	};                                                                                           \
+	MOTOR_SUBSYS_DEFINE(MOTOR_SUBSYS_DT_ENTRY_NAME(node_id),                                    \
+			    &MOTOR_SUBSYS_DT_CTRL_NAME(node_id),                                      \
+			    DEVICE_DT_GET(DT_PHANDLE(node_id, sensor)),                              \
+			    DEVICE_DT_GET(DT_PHANDLE(node_id, actuator)),                            \
+			    &MOTOR_SUBSYS_DT_PIPELINE_NAME(node_id),                                 \
+			    &MOTOR_SUBSYS_DT_ADRC_NAME(node_id), MOTOR_SUBSYS_DT_LABELS_NAME(node_id)[0]);
+
 #define MOTOR_SUBSYS_DT_DEFINE(node_id)                                                            \
 	BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_PHANDLE(node_id, algorithm),                            \
-					zephyr_motor_algorithm_dc_current),                       \
+					zephyr_motor_algorithm_dc_current) ||                  \
+			     DT_NODE_HAS_COMPAT(DT_PHANDLE(node_id, algorithm),                     \
+					zephyr_motor_algorithm_adrc_current),                 \
 		     "unsupported motor algorithm compatible");                                      \
-	MOTOR_SUBSYS_DT_DEFINE_DC_CURRENT(node_id)
+	COND_CODE_1(DT_NODE_HAS_COMPAT(DT_PHANDLE(node_id, algorithm), zephyr_motor_algorithm_dc_current), \
+		    (MOTOR_SUBSYS_DT_DEFINE_DC_CURRENT(node_id)),                              \
+		    (MOTOR_SUBSYS_DT_DEFINE_ADRC_CURRENT(node_id)))
 
 #if IS_ENABLED(CONFIG_MOTOR_SUBSYS)
 DT_FOREACH_STATUS_OKAY(zephyr_motor_controller, MOTOR_SUBSYS_DT_DEFINE)
