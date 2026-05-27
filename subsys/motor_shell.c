@@ -10,6 +10,7 @@
 
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/subsys/motor/algorithms/adrc_current/motor_algo_adrc_current.h>
 #include <zephyr/subsys/motor/algorithms/dc_current/motor_algo_dc_current.h>
 #include <zephyr/subsys/motor/motor.h>
 #include <zephyr/subsys/motor/motor_subsys.h>
@@ -48,6 +49,9 @@ static void print_motor_status(const struct shell *sh, struct motor_ctrl *m)
 {
 	enum motor_state st;
 	uint32_t fa;
+	struct motor_adrc_current_state adrc_state;
+	struct motor_adrc_current_params adrc_params;
+	struct motor_adrc_current_limits adrc_lim;
 	struct motor_dc_current_state dc_state;
 	struct motor_dc_current_pi pi;
 	struct motor_dc_current_limits lim;
@@ -74,6 +78,31 @@ static void print_motor_status(const struct shell *sh, struct motor_ctrl *m)
 	} else {
 		shell_print(sh, "  DC limits: n/a (%d)", r);
 	}
+
+	r = motor_algo_adrc_current_get_params(m, &adrc_params);
+	if (r == 0) {
+		r = motor_algo_adrc_current_get_state(m, &adrc_state);
+		if (r == 0) {
+			shell_print(sh,
+				    "  ADRC state: i_ref=%f i_meas=%f err=%f duty=%f z1=%f z2=%f u=%f",
+				    (double)adrc_state.i_ref_a, (double)adrc_state.i_meas_a,
+				    (double)adrc_state.error_a, (double)adrc_state.duty,
+				    (double)adrc_state.z1, (double)adrc_state.z2,
+				    (double)adrc_state.u);
+		}
+		shell_print(sh, "  ADRC: kp=%f b0=%f beta1=%f beta2=%f out[%.3f, %.3f]",
+			    (double)adrc_params.kp, (double)adrc_params.b0, (double)adrc_params.beta1,
+			    (double)adrc_params.beta2, (double)adrc_params.out_min,
+			    (double)adrc_params.out_max);
+	} else {
+		shell_print(sh, "  ADRC: n/a (%d)", r);
+	}
+	r = motor_algo_adrc_current_get_limits(m, &adrc_lim);
+	if (r == 0) {
+		shell_print(sh, "  ADRC limits: i_max_a=%f", (double)adrc_lim.i_max_a);
+	} else {
+		shell_print(sh, "  ADRC limits: n/a (%d)", r);
+	}
 }
 
 static int cmd_motor(const struct shell *sh, size_t argc, char **argv)
@@ -82,12 +111,16 @@ static int cmd_motor(const struct shell *sh, size_t argc, char **argv)
 	struct motor_ctrl *m = motor_shell_ctx;
 	const char *sub;
 	uint32_t fl;
+	struct motor_adrc_current_params adrc_params;
+	struct motor_adrc_current_limits adrc_lim;
 	struct motor_dc_current_pi pi;
 	struct motor_dc_current_limits lim;
 	bool reset_i;
 
 	if (argc < 2) {
-		shell_error(sh, "sub: list|use|enable|disable|estop|current|selftest|status|pi|imax");
+		shell_error(
+			sh,
+			"sub: list|use|enable|disable|estop|current|selftest|status|pi|imax|adrc");
 		return -EINVAL;
 	}
 
@@ -142,7 +175,10 @@ static int cmd_motor(const struct shell *sh, size_t argc, char **argv)
 		}
 		err = motor_algo_dc_current_set_current(m, strtof(argv[2], NULL));
 		if (err == -ENOTSUP) {
-			shell_error(sh, "current command not supported by selected motor");
+			err = motor_algo_adrc_current_set_current(m, strtof(argv[2], NULL));
+		}
+		if (err == -ENOTSUP) {
+			shell_error(sh, "current command not supported by selected motor algorithm");
 		}
 		return err;
 	}
@@ -184,16 +220,42 @@ static int cmd_motor(const struct shell *sh, size_t argc, char **argv)
 			return -EINVAL;
 		}
 		err = motor_algo_dc_current_get_limits(m, &lim);
+		if (err == 0) {
+			lim.i_max_a = strtof(argv[2], NULL);
+			return motor_algo_dc_current_set_limits(m, &lim);
+		}
+		if (err == -ENOTSUP) {
+			err = motor_algo_adrc_current_get_limits(m, &adrc_lim);
+			if (err != 0) {
+				return err;
+			}
+			adrc_lim.i_max_a = strtof(argv[2], NULL);
+			return motor_algo_adrc_current_set_limits(m, &adrc_lim);
+		}
+		return err;
+	}
+
+	if (strcmp(sub, "adrc") == 0) {
+		if (argc < 6) {
+			shell_error(sh, "adrc <Kp> <B0> <beta1> <beta2> [reset: 0|1]");
+			return -EINVAL;
+		}
+		err = motor_algo_adrc_current_get_params(m, &adrc_params);
 		if (err != 0) {
 			return err;
 		}
-		lim.i_max_a = strtof(argv[2], NULL);
-		return motor_algo_dc_current_set_limits(m, &lim);
+		adrc_params.kp = strtof(argv[2], NULL);
+		adrc_params.b0 = strtof(argv[3], NULL);
+		adrc_params.beta1 = strtof(argv[4], NULL);
+		adrc_params.beta2 = strtof(argv[5], NULL);
+		reset_i = (argc >= 7) && (strtoul(argv[6], NULL, 10) != 0U);
+		return motor_algo_adrc_current_set_params(m, &adrc_params, reset_i);
 	}
 
 	shell_error(sh, "unknown: %s", sub);
 	return -EINVAL;
 }
 
-SHELL_CMD_ARG_REGISTER(motor, NULL, "Motor control: list, use, enable, current, pi, imax, …", cmd_motor, 1,
-		       8);
+SHELL_CMD_ARG_REGISTER(motor, NULL,
+		       "Motor control: list, use, enable, current, pi, adrc, imax, …", cmd_motor,
+		       1, 8);
