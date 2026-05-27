@@ -5,7 +5,7 @@
 
 config MOTOR_SENSOR_STM32
 	bool "STM32 motor sensor (zephyr,motor-sensor-stm32)"
-	depends on SOC_SERIES_STM32G4X
+	depends on SOC_FAMILY_STM32
 	select ZERO_LATENCY_IRQS
 	help
 	  Current sense via LL ADC injected group; JEOC ISR latches samples.

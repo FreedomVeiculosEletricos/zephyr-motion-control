@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * STM32G4 motor power stage: ST LL timer only (no project HAL file). Each leg
+ * STM32 motor power stage: ST LL timer only (no project HAL file). Each leg
  * is a complementary CHx/CHxN pair on an advanced timer (TIM1/TIM8). The
  * actuator callback runs from the timer update interrupt
  * (interrupt-names "up" or "global" on the st,pwm-timer node).
@@ -14,10 +14,9 @@
 #include <errno.h>
 #include <stdint.h>
 
-#include <stm32g4xx.h>
-#include <stm32g4xx_ll_bus.h>
-#include <stm32g4xx_ll_rcc.h>
-#include <stm32g4xx_ll_tim.h>
+#include <stm32_ll_bus.h>
+#include <stm32_ll_rcc.h>
+#include <stm32_ll_tim.h>
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -32,6 +31,23 @@
 #include "motor_actuator_common.h"
 
 #define HB_MAX 3U
+#if defined(__LL_RCC_CALC_HCLK_FREQ)
+#define MOTOR_RCC_CALC_HCLK_FREQ(sysclk, hpre) __LL_RCC_CALC_HCLK_FREQ((sysclk), (hpre))
+#else
+#define MOTOR_RCC_CALC_HCLK_FREQ(sysclk, hpre) LL_RCC_CALC_HCLK_FREQ((sysclk), (hpre))
+#endif
+
+#if defined(__LL_RCC_CALC_PCLK1_FREQ)
+#define MOTOR_RCC_CALC_PCLK1_FREQ(hclk, ppre) __LL_RCC_CALC_PCLK1_FREQ((hclk), (ppre))
+#else
+#define MOTOR_RCC_CALC_PCLK1_FREQ(hclk, ppre) LL_RCC_CALC_PCLK1_FREQ((hclk), (ppre))
+#endif
+
+#if defined(__LL_RCC_CALC_PCLK2_FREQ)
+#define MOTOR_RCC_CALC_PCLK2_FREQ(hclk, ppre) __LL_RCC_CALC_PCLK2_FREQ((hclk), (ppre))
+#else
+#define MOTOR_RCC_CALC_PCLK2_FREQ(hclk, ppre) LL_RCC_CALC_PCLK2_FREQ((hclk), (ppre))
+#endif
 
 /* Custom pinctrl state IDs picked up by Z_PINCTRL_STATE_ID via "complementary"
  * and "single-ended" entries in pinctrl-names.
@@ -104,11 +120,11 @@ static uint32_t tim_clock_hz(const TIM_TypeDef *tim)
 	uint32_t pclk;
 	uint32_t apre;
 
-	hclk = __LL_RCC_CALC_HCLK_FREQ(SystemCoreClock, LL_RCC_GetAHBPrescaler());
+	hclk = MOTOR_RCC_CALC_HCLK_FREQ(SystemCoreClock, LL_RCC_GetAHBPrescaler());
 
 	if ((tim == TIM1) || (tim == TIM8) || (tim == TIM15) || (tim == TIM16) || (tim == TIM17)) {
 		apre = LL_RCC_GetAPB2Prescaler();
-		pclk = __LL_RCC_CALC_PCLK2_FREQ(hclk, apre);
+		pclk = MOTOR_RCC_CALC_PCLK2_FREQ(hclk, apre);
 		if (apre != LL_RCC_APB2_DIV_1) {
 			return pclk * 2U;
 		}
@@ -116,26 +132,11 @@ static uint32_t tim_clock_hz(const TIM_TypeDef *tim)
 	}
 
 	apre = LL_RCC_GetAPB1Prescaler();
-	pclk = __LL_RCC_CALC_PCLK1_FREQ(hclk, apre);
+	pclk = MOTOR_RCC_CALC_PCLK1_FREQ(hclk, apre);
 	if (apre != LL_RCC_APB1_DIV_1) {
 		return pclk * 2U;
 	}
 	return pclk;
-}
-
-static void tim_enable_rcc(TIM_TypeDef *tim)
-{
-	if (tim == TIM1) {
-		LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_TIM1);
-	} else if (tim == TIM2) {
-		LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_TIM2);
-	} else if (tim == TIM3) {
-		LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_TIM3);
-	} else if (tim == TIM4) {
-		LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_TIM4);
-	} else if (tim == TIM8) {
-		LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_TIM8);
-	}
 }
 
 /** Encode dead-time for BDTR DTG[7:0] — t_dt = DTG * t_dts, t_dts = 1 / tim_clk. */
@@ -504,8 +505,6 @@ static int motor_actuator_stm32_hw_init(const struct device *dev)
 	data->drive_mode = MOTOR_DRIVE_NORMAL;
 	data->running = false;
 	atomic_clear(&data->slow_timer_running);
-
-	tim_enable_rcc(cfg->tim);
 
 	err = tim_hbridge_init(cfg->tim, cfg->pwm_freq_hz, cfg->pwm_ch, cfg->n_half_bridges,
 			       cfg->deadtime_ns, cfg->trgo, &data->max_duty);

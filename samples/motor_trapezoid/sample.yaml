@@ -14,3 +14,4 @@ tests:
     extra_args: CONF_FILE=prj.conf
     integration_platforms:
       - nucleo_g474re
+      - nucleo_h753zi

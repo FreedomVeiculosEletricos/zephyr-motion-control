@@ -5,7 +5,7 @@
 
 config MOTOR_STAGE_HBRIDGE_STM32
 	bool "STM32 LL H-bridge (zephyr,motor-stage-hbridge-stm32)"
-	depends on SOC_SERIES_STM32G4X
+	depends on SOC_FAMILY_STM32
 	depends on COUNTER
 	depends on GPIO
 	select PINCTRL
