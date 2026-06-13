@@ -12,36 +12,19 @@ jobs:
   nix-check:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Restore and cache Nix store
-        uses: nix-community/cache-nix-action@v7
+      - uses: ossystems/nix-actions@v1
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.*') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-
-      - run: nix flake check
+          build-hosts: false
+          build-devshells: false
 
   build:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Install SSH Private Key and Known Hosts
-        run: |
-          mkdir -m 0700 ~/.ssh && echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H github.com > ~/.ssh/known_hosts 2>/dev/null && chmod 600 ~/.ssh/known_hosts
-
-      - name: Restore and cache Nix store
-        uses: nix-community/cache-nix-action@v7
+      - uses: ossystems/nix-actions@v1
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.*') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-
-      - name: Load Nix Development Shell
-        uses: nicknovitski/nix-develop@v1
-        with:
-          arguments: ".#default --accept-flake-config"
+          devshell: .#default
+          export-devshell: true
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       - name: Prepare Zephyr Project workspace
         run: |
