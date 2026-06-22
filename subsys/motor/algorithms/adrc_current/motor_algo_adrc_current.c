@@ -33,6 +33,28 @@ static bool adrc_params_valid(const struct motor_adrc_current_params *params)
 	return true;
 }
 
+static void adrc_map_duty_sign_magnitude(float u, struct motor_block_out *out, float *duty_state)
+{
+	float mag = (u >= 0.0f) ? u : -u;
+
+	if (mag > 1.0f) {
+		mag = 1.0f;
+	}
+
+	out->n_duty = 2U;
+	if (u >= 0.0f) {
+		out->duty[0] = mag;
+		out->duty[1] = 0.0f;
+	} else {
+		out->duty[0] = 0.0f;
+		out->duty[1] = mag;
+	}
+
+	if (duty_state != NULL) {
+		*duty_state = mag;
+	}
+}
+
 void motor_adrc_current_block_entry(struct motor_block *self, const struct motor_block_in *in,
 				    struct motor_block_out *out)
 {
@@ -48,10 +70,23 @@ void motor_adrc_current_block_entry(struct motor_block *self, const struct motor
 		ia_meas = in->sense->current_amps[0];
 	}
 
-	if (i_ref > st->limits.i_max_a) {
-		i_ref = st->limits.i_max_a;
-	} else if (i_ref < -st->limits.i_max_a) {
-		i_ref = -st->limits.i_max_a;
+	if (!st->sign_magnitude) {
+		if (i_ref > st->limits.i_max_a) {
+			i_ref = st->limits.i_max_a;
+		} else if (i_ref < -st->limits.i_max_a) {
+			i_ref = -st->limits.i_max_a;
+		}
+	}
+
+	if (st->sign_magnitude && (st->params.beta1 == 0.0f) && (st->params.beta2 == 0.0f)) {
+		u = i_ref;
+		st->state.i_ref_a = i_ref;
+		st->state.i_meas_a = ia_meas;
+		st->state.error_a = i_ref - ia_meas;
+		st->state.u = u;
+		adrc_map_duty_sign_magnitude(u, out, &d);
+		st->state.duty = d;
+		return;
 	}
 
 	e_obs = ia_meas - st->state.z1;
@@ -62,12 +97,20 @@ void motor_adrc_current_block_entry(struct motor_block *self, const struct motor
 	err = i_ref - st->state.z1;
 	u = (st->params.kp * err - st->state.z2) * st->inv_b0;
 	u = CLAMP(u, st->params.out_min, st->params.out_max);
-	d = CLAMP((u + 1.0f) * 0.5f, 0.0f, 1.0f);
 
 	st->state.i_ref_a = i_ref;
 	st->state.i_meas_a = ia_meas;
 	st->state.error_a = err;
 	st->state.u = u;
+
+	if (st->sign_magnitude) {
+		adrc_map_duty_sign_magnitude(u, out, &d);
+		st->state.duty = d;
+		return;
+	}
+
+	d = CLAMP((u + 1.0f) * 0.5f, 0.0f, 1.0f);
+
 	st->state.duty = d;
 
 	out->n_duty = 2U;

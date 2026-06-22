@@ -3,8 +3,9 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * STM32 motor power stage: ST LL timer only (no project HAL file). Each leg
- * is a complementary CHx/CHxN pair on an advanced timer (TIM1/TIM8). The
+ * STM32 motor power stage: ST LL timer only (no project HAL file). Advanced
+ * timers (TIM1/TIM8) use complementary CHx/CHxN; general-purpose timers with
+ * single-ended route one HS PWM pin per leg (gate driver generates LS).
  * actuator callback runs from the timer update interrupt
  * (interrupt-names "up" or "global" on the st,pwm-timer node).
  */
@@ -114,6 +115,12 @@ static void nfault_gpio_cb(const struct device *dev, struct gpio_callback *cb, u
 						 ? LL_TIM_TRGO_ENABLE                               \
 						 : LL_TIM_TRGO_CC1IF)
 
+static bool tim_is_advanced(const TIM_TypeDef *tim)
+{
+	return (tim == TIM1) || (tim == TIM8) || (tim == TIM15) || (tim == TIM16) ||
+	       (tim == TIM17);
+}
+
 static uint32_t tim_clock_hz(const TIM_TypeDef *tim)
 {
 	uint32_t hclk;
@@ -203,6 +210,13 @@ static void oc_set_compare(TIM_TypeDef *tim, uint8_t ch, uint32_t pulse)
 	}
 }
 
+static void oc_set_single_ended_pwm(TIM_TypeDef *tim, uint8_t ch, uint32_t pulse)
+{
+	LL_TIM_OC_SetMode(tim, tim_ch_mask(ch), LL_TIM_OCMODE_PWM1);
+	oc_set_compare(tim, ch, pulse);
+	LL_TIM_CC_EnableChannel(tim, tim_ch_mask(ch));
+}
+
 static void oc_set_complementary_pwm(TIM_TypeDef *tim, uint8_t ch, uint32_t pulse)
 {
 	uint32_t pair = tim_ch_pair_mask(ch);
@@ -249,6 +263,33 @@ static int tim_base_init(TIM_TypeDef *tim, uint32_t freq_hz, uint32_t *arr_out)
 	return 0;
 }
 
+static int tim_gp_pwm_init(TIM_TypeDef *tim, uint32_t freq_hz, const uint8_t *ch, uint8_t n_ch,
+			   uint32_t trgo, uint32_t *max_duty_out)
+{
+	int err;
+	uint32_t arr;
+	uint8_t i;
+
+	err = tim_base_init(tim, freq_hz, &arr);
+	if (err != 0) {
+		return err;
+	}
+
+	for (i = 0U; i < n_ch; i++) {
+		oc_set_single_ended_pwm(tim, ch[i], 0U);
+	}
+
+	LL_TIM_SetTriggerOutput(tim, trgo);
+	LL_TIM_GenerateEvent_UPDATE(tim);
+	LL_TIM_EnableCounter(tim);
+
+	if (max_duty_out != NULL) {
+		*max_duty_out = arr + 1U;
+	}
+
+	return 0;
+}
+
 static int tim_hbridge_init(TIM_TypeDef *tim, uint32_t freq_hz, const uint8_t *ch, uint8_t n_ch,
 			    uint32_t deadtime_ns, uint32_t trgo, uint32_t *max_duty_out)
 {
@@ -282,6 +323,10 @@ static int tim_hbridge_init(TIM_TypeDef *tim, uint32_t freq_hz, const uint8_t *c
 
 static void tim_enable_main_output(TIM_TypeDef *tim, bool enable)
 {
+	if (!tim_is_advanced(tim)) {
+		return;
+	}
+
 	if (enable) {
 		LL_TIM_EnableAllOutputs(tim);
 	} else {
@@ -506,8 +551,13 @@ static int motor_actuator_stm32_hw_init(const struct device *dev)
 	data->running = false;
 	atomic_clear(&data->slow_timer_running);
 
-	err = tim_hbridge_init(cfg->tim, cfg->pwm_freq_hz, cfg->pwm_ch, cfg->n_half_bridges,
-			       cfg->deadtime_ns, cfg->trgo, &data->max_duty);
+	if (cfg->single_ended && !tim_is_advanced(cfg->tim)) {
+		err = tim_gp_pwm_init(cfg->tim, cfg->pwm_freq_hz, cfg->pwm_ch, cfg->n_half_bridges,
+				      cfg->trgo, &data->max_duty);
+	} else {
+		err = tim_hbridge_init(cfg->tim, cfg->pwm_freq_hz, cfg->pwm_ch, cfg->n_half_bridges,
+				       cfg->deadtime_ns, cfg->trgo, &data->max_duty);
+	}
 	if (err != 0) {
 		return err;
 	}
@@ -655,10 +705,16 @@ const struct motor_actuator_ops motor_actuator_stm32_api = {
 	BUILD_ASSERT(ARRAY_SIZE(pwm_ch_array_##inst) >= 1U &&                                      \
 			     ARRAY_SIZE(pwm_ch_array_##inst) <= HB_MAX,                              \
 		     "pwm-channels: length must be 1..3");                                         \
-	BUILD_ASSERT(DT_IRQ_HAS_NAME(MOTOR_ACTUATOR_STM32_TIMER(inst), brk),                        \
-		     "st,pwm-timer must be an advanced timer (TIM1/TIM8) with \"brk\" interrupt"); \
-	BUILD_ASSERT(DT_INST_PROP_LEN(inst, pinctrl_0) ==                                          \
-			     (2U * ARRAY_SIZE(pwm_ch_array_##inst)),                              \
+	BUILD_ASSERT(DT_INST_PROP(inst, single_ended) ||                                           \
+			     DT_IRQ_HAS_NAME(MOTOR_ACTUATOR_STM32_TIMER(inst), brk),                \
+		     "complementary mode requires advanced timer with \"brk\" interrupt");           \
+	BUILD_ASSERT(!DT_INST_PROP(inst, single_ended) ||                                          \
+			     DT_IRQ_HAS_NAME(MOTOR_ACTUATOR_STM32_TIMER(inst), up) ||                \
+			     DT_IRQ_HAS_NAME(MOTOR_ACTUATOR_STM32_TIMER(inst), global),            \
+		     "single-ended timer needs \"up\" or \"global\" interrupt");                   \
+	BUILD_ASSERT(DT_INST_PROP(inst, single_ended) ||                                          \
+			     (DT_INST_PROP_LEN(inst, pinctrl_0) ==                                  \
+			      (2U * ARRAY_SIZE(pwm_ch_array_##inst))),                             \
 		     "pinctrl-0 (complementary) length must equal 2 * len(pwm-channels)");        \
 	BUILD_ASSERT(!DT_INST_PROP(inst, single_ended) ||                                          \
 			     (COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, pinctrl_1),                  \

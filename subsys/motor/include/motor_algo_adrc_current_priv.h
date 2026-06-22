@@ -26,6 +26,7 @@ struct motor_algo_adrc_current_data {
 	float inv_b0;
 	float beta1_dt;
 	float beta2_dt;
+	bool sign_magnitude;
 };
 
 void motor_adrc_current_block_entry(struct motor_block *self, const struct motor_block_in *in,
@@ -86,6 +87,8 @@ void motor_adrc_current_block_set_params(struct motor_block *self);
 		.inv_b0 = 0.0f,                                                                   \
 		.beta1_dt = 0.0f,                                                                 \
 		.beta2_dt = 0.0f,                                                                 \
+		.sign_magnitude = DT_PROP_OR(DT_PHANDLE(controller_node_id, algorithm), sign_magnitude, \
+					     0),                                                      \
 	}
 
 #endif /* ZEPHYR_SUBSYS_MOTOR_ALGO_ADRC_CURRENT_PRIV_H_ */

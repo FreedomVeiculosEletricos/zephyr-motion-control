@@ -45,3 +45,10 @@ properties:
     type: int
     required: true
     description: Software current limit in mA.
+
+  sign-magnitude:
+    type: boolean
+    description: |
+      When set, map control output to one HS leg at a time (duty on leg 0 for
+      u >= 0, leg 1 for u < 0). Used with single-ended gate drivers on a
+      full-bridge. When unset, bipolar complementary duty (d, 1-d) is used.
