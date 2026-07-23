@@ -9,6 +9,7 @@
 #include "motor_algo_adrc_current_priv.h"
 
 #include <zephyr/subsys/motor/motor_controller.h>
+#include <zephyr/subsys/motor/motor_pipeline.h>
 #include <zephyr/sys/util.h>
 
 static struct motor_algo_adrc_current_data *adrc_data_from_block(struct motor_block *self)
@@ -64,7 +65,7 @@ void motor_adrc_current_block_entry(struct motor_block *self, const struct motor
 	float err;
 	float u;
 	float d;
-	float i_ref = st->state.i_ref_a;
+	float i_ref = in->has_current_ref ? in->current_ref_a : st->state.i_ref_a;
 
 	if ((in->sense != NULL) && (in->sense->current_count > 0U)) {
 		ia_meas = in->sense->current_amps[0];
@@ -86,6 +87,7 @@ void motor_adrc_current_block_entry(struct motor_block *self, const struct motor
 		st->state.u = u;
 		adrc_map_duty_sign_magnitude(u, out, &d);
 		st->state.duty = d;
+		out->has_current_ref = false;
 		return;
 	}
 
@@ -106,6 +108,7 @@ void motor_adrc_current_block_entry(struct motor_block *self, const struct motor
 	if (st->sign_magnitude) {
 		adrc_map_duty_sign_magnitude(u, out, &d);
 		st->state.duty = d;
+		out->has_current_ref = false;
 		return;
 	}
 
@@ -116,6 +119,7 @@ void motor_adrc_current_block_entry(struct motor_block *self, const struct motor
 	out->n_duty = 2U;
 	out->duty[0] = d;
 	out->duty[1] = 1.0f - d;
+	out->has_current_ref = false;
 }
 
 void motor_adrc_current_block_set_params(struct motor_block *self)
@@ -142,18 +146,19 @@ void motor_adrc_current_block_reset(struct motor_block *self)
 
 static struct motor_algo_adrc_current_data *adrc_data_from_motor(motor_t motor)
 {
-	struct motor_algo_adrc_current_data *adrc;
-
-	if (motor == NULL) {
+	if ((motor == NULL) || (motor->pipeline == NULL)) {
 		return NULL;
 	}
 
-	adrc = motor->pipeline_ctx;
-	if ((adrc == NULL) || (adrc->base.entry != motor_adrc_current_block_entry)) {
-		return NULL;
+	for (uint8_t i = 0; i < motor->pipeline->n_blocks; i++) {
+		struct motor_block *b = motor->pipeline->blocks[i];
+
+		if ((b != NULL) && (b->entry == motor_adrc_current_block_entry)) {
+			return CONTAINER_OF(b, struct motor_algo_adrc_current_data, base);
+		}
 	}
 
-	return adrc;
+	return NULL;
 }
 
 int motor_algo_adrc_current_set_current(motor_t motor, float i_a)

@@ -1,0 +1,46 @@
+/ {
+	velocity_pi_motor: motor-controller {
+		compatible = "zephyr,motor-controller";
+		status = "okay";
+
+		sensor = <&velocity_pi_sensor>;
+		actuator = <&velocity_pi_actuator>;
+		algorithm = <&velocity_pi_algo &adrc_current_algo>;
+	};
+
+	velocity_pi_algo: motor-algorithm-velocity-pi {
+		compatible = "zephyr,motor-algorithm-velocity-pi";
+		status = "okay";
+
+		velocity-pi-kp-milli = <1000>;
+		velocity-pi-ki-milli = <100>;
+		velocity-pll-kp-milli = <20000>;
+		velocity-pll-ki-milli = <100000>;
+		i-max-ma = <3000>;
+	};
+
+	adrc_current_algo: motor-algorithm-adrc-current {
+		compatible = "zephyr,motor-algorithm-adrc-current";
+		status = "okay";
+
+		adrc-current-kp-milli = <1000>;
+		adrc-current-b0-milli = <1000>;
+		adrc-current-beta1-milli = <0>;
+		adrc-current-beta2-milli = <0>;
+		adrc-current-out-min-milli = <(-1000)>;
+		adrc-current-out-max-milli = <1000>;
+		i-max-ma = <5000>;
+	};
+
+	velocity_pi_sensor: motor-test-sensor {
+		compatible = "zephyr,motor-test-sensor";
+		status = "okay";
+	};
+
+	velocity_pi_actuator: motor-test-actuator {
+		compatible = "zephyr,motor-test-actuator";
+		status = "okay";
+		pwm-frequency = <20000>;
+		slow-sample-div = <10>;
+	};
+};

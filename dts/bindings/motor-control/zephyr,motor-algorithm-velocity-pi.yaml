@@ -1,0 +1,37 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Outer velocity PI with a tracking PLL on measured rotor angle. Outputs a
+  current reference for the next (inner) pipeline block. Referenced from
+  zephyr,motor-controller via the ordered ``algorithm`` phandles list.
+
+compatible: "zephyr,motor-algorithm-velocity-pi"
+
+include: base.yaml
+
+properties:
+  velocity-pi-kp-milli:
+    type: int
+    default: 1000
+    description: Velocity PI proportional gain Kp × 1000.
+
+  velocity-pi-ki-milli:
+    type: int
+    default: 100
+    description: Velocity PI integral gain Ki × 1000.
+
+  velocity-pll-kp-milli:
+    type: int
+    default: 20000
+    description: Angle-tracking PLL proportional gain × 1000.
+
+  velocity-pll-ki-milli:
+    type: int
+    default: 100000
+    description: Angle-tracking PLL integral gain × 1000.
+
+  i-max-ma:
+    type: int
+    required: true
+    description: Software current reference limit in mA.

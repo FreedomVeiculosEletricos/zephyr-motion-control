@@ -6,6 +6,9 @@
 
 #include "motor_ctrl_priv.h"
 
+#include <errno.h>
+#include <zephyr/sys/util.h>
+
 int motor_pipeline_init(struct motor_pipeline *pipeline, void *ctx)
 {
 	ARG_UNUSED(ctx);
@@ -54,14 +57,17 @@ void motor_pipeline_run_stage(struct motor_pipeline *pipeline, void *ctx,
 		return;
 	}
 
-	if (stage != MOTOR_STAGE_INNER_ISR) {
+	if (stage >= MOTOR_STAGE_COUNT) {
 		return;
 	}
 
 	run_in = *in;
+	out->n_duty = 0U;
+	out->has_current_ref = false;
 
 	for (uint8_t i = 0; i < pipeline->n_blocks; i++) {
 		struct motor_block *b = pipeline->blocks[i];
+		struct motor_block_out block_out = {0};
 
 		if ((b == NULL) || (b->stage != stage)) {
 			continue;
@@ -74,7 +80,21 @@ void motor_pipeline_run_stage(struct motor_pipeline *pipeline, void *ctx,
 		}
 
 		if (b->entry != NULL) {
-			b->entry(b, &run_in, out);
+			b->entry(b, &run_in, &block_out);
+		}
+
+		if (block_out.n_duty != 0U) {
+			out->n_duty = block_out.n_duty;
+			for (uint8_t d = 0; d < block_out.n_duty; d++) {
+				out->duty[d] = block_out.duty[d];
+			}
+		}
+
+		if (block_out.has_current_ref) {
+			out->has_current_ref = true;
+			out->current_ref_a = block_out.current_ref_a;
+			run_in.has_current_ref = true;
+			run_in.current_ref_a = block_out.current_ref_a;
 		}
 	}
 }

@@ -45,50 +45,47 @@ void motor_adrc_current_block_set_params(struct motor_block *self);
 			.set_params = motor_adrc_current_block_set_params,                       \
 		},
 
-#define MOTOR_ADRC_CURRENT_DATA_INITIALIZER(controller_node_id)                                     \
+#define MOTOR_ADRC_CURRENT_DATA_INITIALIZER(controller_node_id, algo_node_id)                       \
 	{                                                                                          \
 		MOTOR_ALGO_ADRC_CURRENT_BASE_INITIALIZER                                           \
 		.state = {0},                                                                   \
 		.params =                                                                        \
 			{                                                                        \
-				.kp = (float)DT_PROP(DT_PHANDLE(controller_node_id, algorithm),   \
-						     adrc_current_kp_milli) / 1000.0f,         \
-				.b0 = (float)DT_PROP(DT_PHANDLE(controller_node_id, algorithm),   \
-						     adrc_current_b0_milli) / 1000.0f,         \
-				.beta1 =                                                             \
-					(float)DT_PROP(DT_PHANDLE(controller_node_id,            \
-								   algorithm),                     \
-						 adrc_current_beta1_milli) / 1000.0f,      \
-				.beta2 =                                                             \
-					(float)DT_PROP(DT_PHANDLE(controller_node_id,            \
-								   algorithm),                     \
-						 adrc_current_beta2_milli) / 1000.0f,      \
-				.out_min =                                                           \
-					(float)(int32_t)DT_PROP(DT_PHANDLE(controller_node_id,    \
-								   algorithm),                     \
-							 adrc_current_out_min_milli) / 1000.0f, \
-				.out_max =                                                           \
-					(float)(int32_t)DT_PROP(DT_PHANDLE(controller_node_id,    \
-								   algorithm),                     \
-							 adrc_current_out_max_milli) / 1000.0f, \
+				.kp = (float)DT_PROP(algo_node_id, adrc_current_kp_milli) /      \
+				      1000.0f,                                                   \
+				.b0 = (float)DT_PROP(algo_node_id, adrc_current_b0_milli) /      \
+				      1000.0f,                                                   \
+				.beta1 = (float)DT_PROP(algo_node_id, adrc_current_beta1_milli) /\
+					 1000.0f,                                                \
+				.beta2 = (float)DT_PROP(algo_node_id, adrc_current_beta2_milli) /\
+					 1000.0f,                                                \
+				.out_min = (float)(int32_t)DT_PROP(algo_node_id,                 \
+								   adrc_current_out_min_milli) / \
+					   1000.0f,                                              \
+				.out_max = (float)(int32_t)DT_PROP(algo_node_id,                 \
+								   adrc_current_out_max_milli) / \
+					   1000.0f,                                              \
 			},                                                                       \
 		.limits =                                                                         \
 			{                                                                        \
-				.i_max_a = (float)DT_PROP(DT_PHANDLE(controller_node_id,          \
-								     algorithm), i_max_ma) /       \
-					   1000.0f,                                                \
+				.i_max_a = (float)DT_PROP(algo_node_id, i_max_ma) / 1000.0f,   \
 			},                                                                       \
 		.timing =                                                                        \
 			{                                                                        \
 				.control_loop_dt_s =                                             \
-					1.0f / (float)DT_PROP(DT_PHANDLE(controller_node_id,      \
-									 actuator), pwm_frequency), \
+					1.0f / (float)DT_PROP(DT_PHANDLE(controller_node_id,    \
+									 actuator),             \
+							      pwm_frequency),                    \
 			},                                                                       \
 		.inv_b0 = 0.0f,                                                                   \
 		.beta1_dt = 0.0f,                                                                 \
 		.beta2_dt = 0.0f,                                                                 \
+<<<<<<< HEAD
 		.sign_magnitude = DT_PROP_OR(DT_PHANDLE(controller_node_id, algorithm), sign_magnitude, \
 					     0),                                                      \
+=======
+		.sign_magnitude = DT_PROP_OR(algo_node_id, sign_magnitude, 0),                   \
+>>>>>>> d7e5622 (Add velocity PI outer block and multi-block pipeline chaining)
 	}
 
 #endif /* ZEPHYR_SUBSYS_MOTOR_ALGO_ADRC_CURRENT_PRIV_H_ */

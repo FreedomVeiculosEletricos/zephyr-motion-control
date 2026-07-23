@@ -10,6 +10,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/subsys/motor/motor_controller.h>
+#include <zephyr/subsys/motor/motor_pipeline.h>
 #include <zephyr/sys/util.h>
 
 static struct motor_algo_dc_current_data *dc_data_from_block(struct motor_block *self)
@@ -25,12 +26,19 @@ void motor_dc_current_block_entry(struct motor_block *self, const struct motor_b
 	float err;
 	float u;
 	float d;
+	float i_ref = in->has_current_ref ? in->current_ref_a : st->state.i_ref_a;
 
 	if ((in->sense != NULL) && (in->sense->current_count > 0U)) {
 		ia_meas = in->sense->current_amps[0];
 	}
 
-	err = st->state.i_ref_a - ia_meas;
+	if (i_ref > st->limits.i_max_a) {
+		i_ref = st->limits.i_max_a;
+	} else if (i_ref < -st->limits.i_max_a) {
+		i_ref = -st->limits.i_max_a;
+	}
+
+	err = i_ref - ia_meas;
 	st->i_integral += st->ki_dt * err;
 	u = st->pi.kp * err + st->i_integral;
 
@@ -49,6 +57,7 @@ void motor_dc_current_block_entry(struct motor_block *self, const struct motor_b
 	 */
 	d = (u + 1.0f) * 0.5f;
 
+	st->state.i_ref_a = i_ref;
 	st->state.i_meas_a = ia_meas;
 	st->state.error_a = err;
 	st->state.duty = d;
@@ -56,6 +65,7 @@ void motor_dc_current_block_entry(struct motor_block *self, const struct motor_b
 	out->n_duty = 2U;
 	out->duty[0] = d;
 	out->duty[1] = 1.0f - d;
+	out->has_current_ref = false;
 }
 
 void motor_dc_current_block_set_params(struct motor_block *self)
@@ -75,18 +85,19 @@ void motor_dc_current_block_reset(struct motor_block *self)
 
 static struct motor_algo_dc_current_data *dc_data_from_motor(motor_t motor)
 {
-	struct motor_algo_dc_current_data *dc;
-
-	if (motor == NULL) {
+	if ((motor == NULL) || (motor->pipeline == NULL)) {
 		return NULL;
 	}
 
-	dc = motor->pipeline_ctx;
-	if ((dc == NULL) || (dc->base.entry != motor_dc_current_block_entry)) {
-		return NULL;
+	for (uint8_t i = 0; i < motor->pipeline->n_blocks; i++) {
+		struct motor_block *b = motor->pipeline->blocks[i];
+
+		if ((b != NULL) && (b->entry == motor_dc_current_block_entry)) {
+			return CONTAINER_OF(b, struct motor_algo_dc_current_data, base);
+		}
 	}
 
-	return dc;
+	return NULL;
 }
 
 int motor_algo_dc_current_set_current(motor_t motor, float i_a)

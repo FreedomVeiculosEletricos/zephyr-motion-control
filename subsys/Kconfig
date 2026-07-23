@@ -19,7 +19,7 @@ config MOTOR_CONTROL_LIB
 		    (MOTOR_SENSOR_STM32 || MOTOR_SENSOR_ESP32)))
 	help
 	  Builds motor_ctrl, motor_* API, and in-tree algorithm backends
-	  (dc-current and adrc-current).
+	  (dc-current, adrc-current, velocity-pi).
 
 config MOTOR_SUBSYS
 	bool "Motor multi-instance DT registration (motor_subsys_* API)"

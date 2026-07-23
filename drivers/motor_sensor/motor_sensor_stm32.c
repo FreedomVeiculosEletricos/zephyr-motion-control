@@ -24,6 +24,10 @@
 #endif
 #include <zephyr/sys/util.h>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 #if defined(LL_ADC_SAMPLINGTIME_6CYCLES_5)
 #define MOTOR_STM32_ADC_SAMPLE_TIME LL_ADC_SAMPLINGTIME_6CYCLES_5
 #elif defined(LL_ADC_SAMPLINGTIME_8CYCLES_5)
@@ -299,7 +303,9 @@ static int motor_sensor_stm32_start_sample(const struct device *dev, enum motor_
 				if (err != 0) {
 					return err;
 				}
-				data->angle_rad = (float)sensor_value_to_double(&val);
+				/* SENSOR_CHAN_ROTATION is degrees; store radians. */
+				data->angle_rad = (float)sensor_value_to_double(&val) *
+						  ((float)M_PI / 180.0f);
 			}
 		}
 		return 0;
