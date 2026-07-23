@@ -80,12 +80,7 @@ void motor_adrc_current_block_set_params(struct motor_block *self);
 		.inv_b0 = 0.0f,                                                                   \
 		.beta1_dt = 0.0f,                                                                 \
 		.beta2_dt = 0.0f,                                                                 \
-<<<<<<< HEAD
-		.sign_magnitude = DT_PROP_OR(DT_PHANDLE(controller_node_id, algorithm), sign_magnitude, \
-					     0),                                                      \
-=======
 		.sign_magnitude = DT_PROP_OR(algo_node_id, sign_magnitude, 0),                   \
->>>>>>> d7e5622 (Add velocity PI outer block and multi-block pipeline chaining)
 	}
 
 #endif /* ZEPHYR_SUBSYS_MOTOR_ALGO_ADRC_CURRENT_PRIV_H_ */
