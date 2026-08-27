@@ -102,6 +102,102 @@ ZTEST(motor_algo_velocity_pi_suite, test_pll_tracks_constant_speed_angle)
 	zassert_within(vel.state.omega_hat_rad_s, omega, 1.0f, NULL);
 }
 
+static struct motor_algo_velocity_pi_data make_open_loop_startup_vel(float startup_a)
+{
+	struct motor_algo_velocity_pi_data vel = {
+		MOTOR_ALGO_VELOCITY_PI_BASE_INITIALIZER
+		.state = {0},
+		.params =
+			{
+				.kp = 0.1f,
+				.ki = 1.0f,
+				.pll_kp = 40.0f,
+				.pll_ki = 400.0f,
+			},
+		.limits = {.i_max_a = 3.0f, .open_loop_startup_a = startup_a},
+		.timing = {.control_loop_dt_s = 0.001f},
+	};
+
+	motor_velocity_pi_block_set_params(&vel.base);
+
+	return vel;
+}
+
+ZTEST(motor_algo_velocity_pi_suite, test_open_loop_startup_follows_command_sign)
+{
+	struct motor_algo_velocity_pi_data vel = make_open_loop_startup_vel(0.8f);
+	struct motor_sense_bundle sense = {.angle_valid = false};
+	struct motor_block_in in = {.sense = &sense};
+	struct motor_block_out out = {0};
+
+	vel.state.v_ref_rad_s = 50.0f;
+	motor_velocity_pi_block_entry(&vel.base, &in, &out);
+	zassert_true(out.has_current_ref, NULL);
+	zassert_within(out.current_ref_a, 0.8f, 1e-6f, NULL);
+
+	vel.state.v_ref_rad_s = -50.0f;
+	motor_velocity_pi_block_entry(&vel.base, &in, &out);
+	zassert_within(out.current_ref_a, -0.8f, 1e-6f, NULL);
+
+	vel.state.v_ref_rad_s = 0.0f;
+	motor_velocity_pi_block_entry(&vel.base, &in, &out);
+	zassert_within(out.current_ref_a, 0.0f, 1e-6f, "a zero command must not push current");
+}
+
+ZTEST(motor_algo_velocity_pi_suite, test_open_loop_startup_hands_over_to_closed_loop)
+{
+	struct motor_algo_velocity_pi_data vel = make_open_loop_startup_vel(0.8f);
+	struct motor_sense_bundle sense = {.angle_valid = false};
+	struct motor_block_in in = {.sense = &sense};
+	struct motor_block_out out = {0};
+
+	vel.state.v_ref_rad_s = 50.0f;
+	for (int i = 0; i < 100; i++) {
+		motor_velocity_pi_block_entry(&vel.base, &in, &out);
+	}
+	zassert_within(vel.i_integral, 0.0f, 1e-6f, "the open loop must not wind up");
+
+	sense.angle_valid = true;
+	sense.angle_rad = 0.1f;
+	motor_velocity_pi_block_entry(&vel.base, &in, &out);
+
+	zassert_true(vel.pll_primed, "the PLL must re-prime on the first valid angle");
+	zassert_within(vel.state.theta_hat_rad, 0.1f, 1e-6f, NULL);
+}
+
+ZTEST(motor_algo_velocity_pi_suite, test_without_startup_current_reference_is_held)
+{
+	struct motor_algo_velocity_pi_data vel = make_open_loop_startup_vel(0.0f);
+	struct motor_sense_bundle sense = {.angle_valid = false};
+	struct motor_block_in in = {.sense = &sense};
+	struct motor_block_out out = {0};
+
+	vel.state.i_ref_a = 1.25f;
+	vel.state.v_ref_rad_s = 50.0f;
+
+	motor_velocity_pi_block_entry(&vel.base, &in, &out);
+
+	zassert_within(out.current_ref_a, 1.25f, 1e-6f, NULL);
+}
+
+ZTEST(motor_algo_velocity_pi_suite, test_rejects_startup_current_above_limit)
+{
+	motor_t motor = motor_subsys_get_by_label("velocity_pi_motor");
+	struct motor_velocity_pi_limits limits = {
+		.i_max_a = 3.0f,
+		.open_loop_startup_a = 3.5f,
+	};
+
+	zassert_not_null(motor, NULL);
+	zassert_equal(motor_algo_velocity_pi_set_limits(motor, &limits), -EINVAL, NULL);
+
+	limits.open_loop_startup_a = -0.1f;
+	zassert_equal(motor_algo_velocity_pi_set_limits(motor, &limits), -EINVAL, NULL);
+
+	limits.open_loop_startup_a = 1.0f;
+	zassert_equal(motor_algo_velocity_pi_set_limits(motor, &limits), 0, NULL);
+}
+
 ZTEST(motor_algo_velocity_pi_suite, test_pi_saturates_current_ref)
 {
 	struct motor_algo_velocity_pi_data vel = {

@@ -31,6 +31,13 @@ struct motor_velocity_pi_params {
 
 struct motor_velocity_pi_limits {
 	float i_max_a;
+	/**
+	 * Current pushed in the commanded direction while the angle is invalid,
+	 * in amps.  Zero keeps the last reference instead, which is the right
+	 * behaviour with a real encoder but stalls a sensorless start, where the
+	 * estimate only becomes valid once the rotor is already turning.
+	 */
+	float open_loop_startup_a;
 };
 
 struct motor_velocity_pi_state {

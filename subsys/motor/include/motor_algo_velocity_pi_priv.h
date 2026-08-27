@@ -64,6 +64,10 @@ void motor_velocity_pi_block_set_params(struct motor_block *self);
 		.limits =                                                                         \
 			{                                                                        \
 				.i_max_a = (float)DT_PROP(algo_node_id, i_max_ma) / 1000.0f,   \
+				.open_loop_startup_a =                                           \
+					(float)DT_PROP(algo_node_id,                             \
+						       open_loop_startup_current_ma) /           \
+					1000.0f,                                                 \
 			},                                                                       \
 		.timing =                                                                        \
 			{                                                                        \

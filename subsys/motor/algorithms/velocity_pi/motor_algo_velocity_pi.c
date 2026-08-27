@@ -61,6 +61,20 @@ void motor_velocity_pi_block_entry(struct motor_block *self, const struct motor_
 	out->has_current_ref = false;
 
 	if ((in->sense == NULL) || !in->sense->angle_valid) {
+		if (st->limits.open_loop_startup_a > 0.0f) {
+			if (st->state.v_ref_rad_s > 0.0f) {
+				st->state.i_ref_a = st->limits.open_loop_startup_a;
+			} else if (st->state.v_ref_rad_s < 0.0f) {
+				st->state.i_ref_a = -st->limits.open_loop_startup_a;
+			} else {
+				st->state.i_ref_a = 0.0f;
+			}
+
+			/* The loop is open here: nothing would ever unwind these. */
+			st->i_integral = 0.0f;
+			st->pll_primed = false;
+		}
+
 		out->has_current_ref = true;
 		out->current_ref_a = st->state.i_ref_a;
 		return;
@@ -222,6 +236,11 @@ int motor_algo_velocity_pi_set_limits(motor_t motor, const struct motor_velocity
 	struct motor_algo_velocity_pi_data *vel = velocity_data_from_motor(motor);
 
 	if ((limits == NULL) || (limits->i_max_a <= 0.0f)) {
+		return -EINVAL;
+	}
+
+	if ((limits->open_loop_startup_a < 0.0f) ||
+	    (limits->open_loop_startup_a > limits->i_max_a)) {
 		return -EINVAL;
 	}
 

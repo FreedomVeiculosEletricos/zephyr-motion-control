@@ -35,3 +35,12 @@ properties:
     type: int
     required: true
     description: Software current reference limit in mA.
+
+  open-loop-startup-current-ma:
+    type: int
+    default: 0
+    description: |
+      Current in mA pushed in the commanded direction while the angle feedback
+      is invalid. Zero holds the last reference instead, which suits a real
+      encoder but stalls a sensorless start, since the observer only becomes
+      valid once the rotor is already turning. Must not exceed i-max-ma.
