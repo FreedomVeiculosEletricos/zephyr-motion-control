@@ -27,6 +27,8 @@ static void motor_ctrl_run_inner(struct motor_ctrl *ctrl, const struct motor_sen
 		.sense = sense,
 		.has_current_ref = ctrl->cascaded_current_ref_valid,
 		.current_ref_a = ctrl->cascaded_current_ref_a,
+		.has_applied_u = ctrl->last_applied_u_valid,
+		.applied_u = ctrl->last_applied_u,
 	};
 
 	motor_pipeline_run_stage(ctrl->pipeline, ctrl->pipeline_ctx, MOTOR_STAGE_INNER_ISR,
@@ -80,6 +82,8 @@ int motor_ctrl_init(struct motor_ctrl *ctrl, const struct device *sensor,
 	ctrl->inner_rate_hz = inner_rate_hz;
 	ctrl->cascaded_current_ref_a = 0.0f;
 	ctrl->cascaded_current_ref_valid = false;
+	ctrl->last_applied_u = 0.0f;
+	ctrl->last_applied_u_valid = false;
 
 	err = motor_pipeline_init(pipeline, pipeline_ctx);
 	if (err != 0) {
@@ -134,6 +138,10 @@ static void motor_ctrl_hot_pwm_isr(const struct device *actuator, void *user_dat
 	motor_ctrl_run_inner(ctrl, &sense, &out);
 	if (out.n_duty != 0U) {
 		(void)motor_actuator_set_duty(actuator, out.duty, out.n_duty);
+	}
+	if (out.has_applied_u) {
+		ctrl->last_applied_u = out.applied_u;
+		ctrl->last_applied_u_valid = true;
 	}
 	(void)motor_sensor_start_sample(ctrl->sensor, MOTOR_SENSOR_CHAN_CURRENT);
 	ctrl->inner_stage_tick++;
@@ -233,6 +241,8 @@ int motor_ctrl_enable(struct motor_ctrl *ctrl)
 
 	k_mutex_lock(&ctrl->lock, K_FOREVER);
 	motor_pipeline_reset(ctrl->pipeline, ctrl->pipeline_ctx);
+	ctrl->last_applied_u = 0.0f;
+	ctrl->last_applied_u_valid = false;
 	err = motor_actuator_enable(ctrl->actuator);
 	if (err == 0) {
 		(void)motor_sensor_start_sample(ctrl->sensor, MOTOR_SENSOR_CHAN_CURRENT);

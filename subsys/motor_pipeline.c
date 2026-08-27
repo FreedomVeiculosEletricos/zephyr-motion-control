@@ -64,6 +64,7 @@ void motor_pipeline_run_stage(struct motor_pipeline *pipeline, void *ctx,
 	run_in = *in;
 	out->n_duty = 0U;
 	out->has_current_ref = false;
+	out->has_applied_u = false;
 
 	for (uint8_t i = 0; i < pipeline->n_blocks; i++) {
 		struct motor_block *b = pipeline->blocks[i];
@@ -95,6 +96,14 @@ void motor_pipeline_run_stage(struct motor_pipeline *pipeline, void *ctx,
 			out->current_ref_a = block_out.current_ref_a;
 			run_in.has_current_ref = true;
 			run_in.current_ref_a = block_out.current_ref_a;
+		}
+
+		/* Deliberately not fed back into run_in: a block must always see
+		 * the command from the previous tick, whatever its position.
+		 */
+		if (block_out.has_applied_u) {
+			out->has_applied_u = true;
+			out->applied_u = block_out.applied_u;
 		}
 	}
 }

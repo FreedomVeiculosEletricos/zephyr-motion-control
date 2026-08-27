@@ -66,6 +66,8 @@ void motor_dc_current_block_entry(struct motor_block *self, const struct motor_b
 	out->duty[0] = d;
 	out->duty[1] = 1.0f - d;
 	out->has_current_ref = false;
+	out->applied_u = u;
+	out->has_applied_u = true;
 }
 
 void motor_dc_current_block_set_params(struct motor_block *self)

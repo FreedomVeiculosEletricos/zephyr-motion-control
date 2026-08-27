@@ -51,6 +51,12 @@ static void adrc_map_duty_sign_magnitude(float u, struct motor_block_out *out, f
 		out->duty[1] = mag;
 	}
 
+	/* Report the command that survived the magnitude clamp, which is what
+	 * actually reaches the bridge.
+	 */
+	out->applied_u = (u >= 0.0f) ? mag : -mag;
+	out->has_applied_u = true;
+
 	if (duty_state != NULL) {
 		*duty_state = mag;
 	}
@@ -120,6 +126,8 @@ void motor_adrc_current_block_entry(struct motor_block *self, const struct motor
 	out->duty[0] = d;
 	out->duty[1] = 1.0f - d;
 	out->has_current_ref = false;
+	out->applied_u = u;
+	out->has_applied_u = true;
 }
 
 void motor_adrc_current_block_set_params(struct motor_block *self)

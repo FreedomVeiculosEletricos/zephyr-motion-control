@@ -41,6 +41,11 @@ struct motor_block_in {
 	const struct motor_sense_bundle *sense;
 	float current_ref_a;
 	bool has_current_ref;
+	/* Signed normalized command applied on the previous inner tick. Blocks
+	 * that model the plant need u(k-1), since i(k) is its consequence.
+	 */
+	float applied_u;
+	bool has_applied_u;
 };
 
 struct motor_block_out {
@@ -48,6 +53,11 @@ struct motor_block_out {
 	uint8_t n_duty;
 	float current_ref_a;
 	bool has_current_ref;
+	/* Signed normalized command behind @ref duty, before the topology
+	 * mapping makes it ambiguous (bipolar vs sign-magnitude).
+	 */
+	float applied_u;
+	bool has_applied_u;
 };
 
 struct motor_pipeline;
@@ -68,6 +78,10 @@ struct motor_ctrl {
 	/* Cross-rate hop: OUTER writes, INNER reads (float32 store is atomic). */
 	float cascaded_current_ref_a;
 	bool cascaded_current_ref_valid;
+
+	/* Inner-tick hop: written at the end of a tick, read on the next one. */
+	float last_applied_u;
+	bool last_applied_u_valid;
 
 	struct k_mutex lock;
 	struct k_sem slow_tick_sem;
