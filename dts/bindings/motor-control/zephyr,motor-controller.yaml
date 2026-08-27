@@ -2,17 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 description: |
-  Motor controller: composes one sensor, one actuator, and one algorithm instance
-  (phandle). The user wires concrete devices and an algorithm node in Devicetree;
-  the subsystem exposes a @c motor_t handle to the application API.
+  Motor controller: composes one sensor, one actuator, and an ordered algorithm
+  pipeline (phandles). The user wires concrete devices and algorithm nodes in
+  Devicetree; the subsystem exposes a @c motor_t handle to the application API.
 
-  The motor application API sets a **current reference** (A); the algorithm
-  block maps measurements and setpoint to actuator commands.  Different algorithm
-  compatibles (e.g. FOC) will be separate child bindings referenced the same way.
+  @c algorithm is an ordered list outer → inner. A single phandle remains valid
+  (current-only). Example cascade::
 
-  Extending for FOC/BLDC (future) typically adds a new algorithm compatible and
-  keeps the same @c sensor / @c actuator / @c algorithm phandle pattern on this
-  node (or a specialized controller compatible that includes the same phandles).
+    algorithm = <&vel_pi &adrc>;
 
 compatible: "zephyr,motor-controller"
 
@@ -34,9 +31,9 @@ properties:
       zephyr,motor-stage-hbridge-common.yaml.
 
   algorithm:
-    type: phandle
+    type: phandles
     required: true
     description: |
-      Algorithm instance (e.g. a node with compatible
-      "zephyr,motor-algorithm-dc-current" or
-      "zephyr,motor-algorithm-adrc-current" and tuning properties).
+      Ordered algorithm pipeline (outer → inner). Each phandle references a
+      node such as zephyr,motor-algorithm-velocity-pi,
+      zephyr,motor-algorithm-dc-current, or zephyr,motor-algorithm-adrc-current.
