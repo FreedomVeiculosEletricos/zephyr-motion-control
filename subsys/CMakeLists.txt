@@ -8,6 +8,8 @@ zephyr_library_sources_ifdef(CONFIG_MOTOR_CONTROL_LIB motor_ctrl.c motor.c motor
 			     motor/algorithms/dc_current/motor_algo_dc_current.c
 			     motor/algorithms/adrc_current/motor_algo_adrc_current.c
 			     motor/algorithms/velocity_pi/motor_algo_velocity_pi.c)
+zephyr_library_sources_ifdef(CONFIG_MOTOR_ALGO_VELOCITY_OBSERVER
+			     motor/algorithms/velocity_observer/motor_algo_velocity_observer.c)
 zephyr_library_sources_ifdef(CONFIG_MOTOR_SUBSYS motor_subsys.c)
 zephyr_library_sources_ifdef(CONFIG_MOTOR_CONTROL_SHELL motor_shell.c)
 

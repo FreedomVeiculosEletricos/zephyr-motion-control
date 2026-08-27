@@ -12,6 +12,7 @@
 
 #include "motor_algo_adrc_current_priv.h"
 #include "motor_algo_dc_current_priv.h"
+#include "motor_algo_velocity_observer_priv.h"
 #include "motor_algo_velocity_pi_priv.h"
 #include "motor_ctrl_priv.h"
 
@@ -41,9 +42,13 @@
 	DT_NODE_HAS_COMPAT(MOTOR_SUBSYS_ALGO_NODE(node_id, idx), zephyr_motor_algorithm_adrc_current)
 #define MOTOR_SUBSYS_ALGO_IS_DC(node_id, idx)                                                         \
 	DT_NODE_HAS_COMPAT(MOTOR_SUBSYS_ALGO_NODE(node_id, idx), zephyr_motor_algorithm_dc_current)
+#define MOTOR_SUBSYS_ALGO_IS_OBS(node_id, idx)                                                        \
+	DT_NODE_HAS_COMPAT(MOTOR_SUBSYS_ALGO_NODE(node_id, idx),                                      \
+			   zephyr_motor_algorithm_velocity_observer)
 
 #define MOTOR_SUBSYS_ASSERT_ALGO(idx, node_id)                                                       \
 	BUILD_ASSERT(MOTOR_SUBSYS_ALGO_IS_VEL(node_id, idx) || MOTOR_SUBSYS_ALGO_IS_ADRC(node_id, idx) || \
+			     MOTOR_SUBSYS_ALGO_IS_OBS(node_id, idx) ||                                \
 			     MOTOR_SUBSYS_ALGO_IS_DC(node_id, idx),                                   \
 		     "unsupported motor algorithm compatible");
 
@@ -58,10 +63,18 @@
 			(static struct motor_algo_adrc_current_data MOTOR_SUBSYS_DT_ALGO_NAME(        \
 				node_id, idx) = MOTOR_ADRC_CURRENT_DATA_INITIALIZER(                 \
 				node_id, MOTOR_SUBSYS_ALGO_NODE(node_id, idx));),                    \
-			(static struct motor_algo_dc_current_data MOTOR_SUBSYS_DT_ALGO_NAME(node_id,  \
-											   idx) =    \
-				 MOTOR_DC_CURRENT_DATA_INITIALIZER(                                  \
-					 node_id, MOTOR_SUBSYS_ALGO_NODE(node_id, idx));))))
+			(COND_CODE_1(                                                                \
+				MOTOR_SUBSYS_ALGO_IS_OBS(node_id, idx),                              \
+				(static struct motor_algo_velocity_observer_data                     \
+					 MOTOR_SUBSYS_DT_ALGO_NAME(node_id, idx) =                   \
+						 MOTOR_VELOCITY_OBSERVER_DATA_INITIALIZER(           \
+							 node_id,                                    \
+							 MOTOR_SUBSYS_ALGO_NODE(node_id, idx));),    \
+				(static struct motor_algo_dc_current_data MOTOR_SUBSYS_DT_ALGO_NAME( \
+					 node_id, idx) =                                             \
+					 MOTOR_DC_CURRENT_DATA_INITIALIZER(                          \
+						 node_id,                                            \
+						 MOTOR_SUBSYS_ALGO_NODE(node_id, idx));))))))
 
 #define MOTOR_SUBSYS_BLOCK_PTR(idx, node_id) &MOTOR_SUBSYS_DT_ALGO_NAME(node_id, idx).base
 
