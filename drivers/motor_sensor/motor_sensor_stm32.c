@@ -115,6 +115,7 @@ struct motor_sensor_stm32_config {
 	const struct device *feedback_sensor;
 	const struct stm32_pclken *pclken;
 	size_t pclk_len;
+	uint32_t adc_common_clock;
 	float amps_per_volt;
 	uint32_t vref_mv;
 	uint8_t resolution_bits;
@@ -228,8 +229,8 @@ static uint32_t inj_seq_len_from_n(uint8_t n)
 	}
 }
 
-static int adc_inj_configure(ADC_TypeDef *adc, const uint32_t *ch_decimal, uint8_t n,
-			     uint8_t resolution_bits)
+static int adc_inj_configure(ADC_TypeDef *adc, uint32_t common_clock, const uint32_t *ch_decimal,
+			     uint8_t n, uint8_t resolution_bits)
 {
 	uint8_t i;
 	uint32_t ll_resolution;
@@ -243,7 +244,7 @@ static int adc_inj_configure(ADC_TypeDef *adc, const uint32_t *ch_decimal, uint8
 		return -EINVAL;
 	}
 
-	LL_ADC_SetCommonClock(__LL_ADC_COMMON_INSTANCE(adc), LL_ADC_CLOCK_ASYNC_DIV1);
+	LL_ADC_SetCommonClock(__LL_ADC_COMMON_INSTANCE(adc), common_clock);
 	LL_ADC_DisableDeepPowerDown(adc);
 	LL_ADC_EnableInternalRegulator(adc);
 	k_busy_wait(LL_ADC_DELAY_INTERNAL_REGUL_STAB_US);
@@ -471,8 +472,8 @@ static int motor_sensor_stm32_calibrate(const struct device *dev, enum motor_sen
 		int err;
 		int s;
 
-		err = adc_inj_configure(cfg->adc, &data->adc_ch_decimal[i], 1,
-					cfg->resolution_bits);
+		err = adc_inj_configure(cfg->adc, cfg->adc_common_clock, &data->adc_ch_decimal[i],
+					1, cfg->resolution_bits);
 		if (err != 0) {
 			return err;
 		}
@@ -491,8 +492,8 @@ static int motor_sensor_stm32_calibrate(const struct device *dev, enum motor_sen
 		data->current_offset[i] = sum * (1.0f / 32.0f);
 	}
 
-	return adc_inj_configure(cfg->adc, data->adc_ch_decimal, data->n_adc_channels,
-				 cfg->resolution_bits);
+	return adc_inj_configure(cfg->adc, cfg->adc_common_clock, data->adc_ch_decimal,
+				 data->n_adc_channels, cfg->resolution_bits);
 }
 
 static bool motor_sensor_stm32_channel_supported(const struct device *dev,
@@ -535,6 +536,22 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 };
 
 #define ADC_FROM_PHANDLE(inst) ((ADC_TypeDef *)DT_REG_ADDR(DT_INST_PHANDLE(inst, adc)))
+
+/* Mirror what the Zephyr ADC driver derives from st,adc-clock-source and
+ * st,adc-prescaler, so a board that clocks its ADC synchronously keeps that
+ * setting instead of being forced onto an asynchronous source that may have no
+ * PLL feeding it.
+ */
+#define SENSOR_STM32_ADC_CLOCK_PREFIX(inst)                                                        \
+	COND_CODE_1(IS_EQ(DT_STRING_UPPER_TOKEN(DT_INST_PHANDLE(inst, adc), st_adc_clock_source),   \
+			  SYNC),                                                                   \
+		    (LL_ADC_CLOCK_SYNC_PCLK_DIV), (LL_ADC_CLOCK_ASYNC_DIV))
+
+#define SENSOR_STM32_ADC_COMMON_CLOCK(inst)                                                        \
+	COND_CODE_1(DT_NODE_HAS_PROP(DT_INST_PHANDLE(inst, adc), st_adc_clock_source),              \
+		    (CONCAT(SENSOR_STM32_ADC_CLOCK_PREFIX(inst),                                   \
+			    DT_PROP(DT_INST_PHANDLE(inst, adc), st_adc_prescaler))),                \
+		    (LL_ADC_CLOCK_ASYNC_DIV1))
 #define SENSOR_STM32_ADC_IRQN(inst) DT_IRQ_BY_IDX(DT_INST_PHANDLE(inst, adc), 0, irq)
 #define SENSOR_STM32_ADC_IRQ_PRIO(inst)                                                         \
 	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, zephyr_adc_irq_priority),                      \
@@ -554,6 +571,7 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 		.sync_actuator = DEVICE_DT_GET(DT_INST_PHANDLE(inst, sync_actuator)),              \
 		.pclken = motor_sensor_stm32_pclken_##inst,                                        \
 		.pclk_len = ARRAY_SIZE(motor_sensor_stm32_pclken_##inst),                          \
+		.adc_common_clock = SENSOR_STM32_ADC_COMMON_CLOCK(inst),                           \
 		.feedback_sensor =                                                                   \
 			COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, feedback_sensor),                    \
 				    (DEVICE_DT_GET(DT_INST_PHANDLE(inst, feedback_sensor))),         \
@@ -604,8 +622,8 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 		data->measurement_done_cb = NULL;                                                  \
 		data->measurement_done_user_data = NULL;                                           \
 		data->angle_rad = 0.0f;                                                            \
-		err = adc_inj_configure(cfg->adc, data->adc_ch_decimal, data->n_adc_channels,        \
-					cfg->resolution_bits);                                       \
+		err = adc_inj_configure(cfg->adc, cfg->adc_common_clock, data->adc_ch_decimal,      \
+					data->n_adc_channels, cfg->resolution_bits);                 \
 		if (err != 0) {                                                                    \
 			return err;                                                                \
 		}                                                                                  \
