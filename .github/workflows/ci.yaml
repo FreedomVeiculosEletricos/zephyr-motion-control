@@ -9,14 +9,6 @@ on:
       - 'releases/**'
 
 jobs:
-  nix-check:
-    runs-on: self-hosted
-    steps:
-      - uses: ossystems/nix-actions@v1
-        with:
-          build-hosts: false
-          build-devshells: false
-
   build:
     runs-on: self-hosted
     steps:
