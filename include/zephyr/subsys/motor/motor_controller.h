@@ -25,8 +25,7 @@ extern "C" {
  * Application code uses @ref motor.h.  The inner (current) loop runs in the
  * power-stage PWM ISR using an N-1 sample cadence: @c inner_rate_hz matches
  * the actuator PWM frequency from @ref motor_stage_config.pwm_period_ns.
- * Additional @ref motor_pipeline_stage values are reserved for future outer
- * or multi-rate blocks.
+ * Outer blocks run on the slow thread at PWM / @c slow-sample-div.
  */
 
 struct motor_block;
@@ -40,11 +39,25 @@ struct motor_sense_bundle {
 
 struct motor_block_in {
 	const struct motor_sense_bundle *sense;
+	float current_ref_a;
+	bool has_current_ref;
+	/* Signed normalized command applied on the previous inner tick. Blocks
+	 * that model the plant need u(k-1), since i(k) is its consequence.
+	 */
+	float applied_u;
+	bool has_applied_u;
 };
 
 struct motor_block_out {
 	float duty[MOTOR_ACTUATOR_DUTY_MAX];
 	uint8_t n_duty;
+	float current_ref_a;
+	bool has_current_ref;
+	/* Signed normalized command behind @ref duty, before the topology
+	 * mapping makes it ambiguous (bipolar vs sign-magnitude).
+	 */
+	float applied_u;
+	bool has_applied_u;
 };
 
 struct motor_pipeline;
@@ -61,6 +74,14 @@ struct motor_ctrl {
 
 	uint32_t inner_stage_tick;
 	uint32_t slow_stage_tick;
+
+	/* Cross-rate hop: OUTER writes, INNER reads (float32 store is atomic). */
+	float cascaded_current_ref_a;
+	bool cascaded_current_ref_valid;
+
+	/* Inner-tick hop: written at the end of a tick, read on the next one. */
+	float last_applied_u;
+	bool last_applied_u_valid;
 
 	struct k_mutex lock;
 	struct k_sem slow_tick_sem;

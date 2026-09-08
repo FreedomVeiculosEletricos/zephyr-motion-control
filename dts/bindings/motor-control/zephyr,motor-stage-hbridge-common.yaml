@@ -92,8 +92,10 @@ properties:
   slow-sample-div:
     type: int
     required: true
-    const: 10
-    description: Slow timer period as an integer multiple of the PWM period.
+    default: 10
+    description: |
+      Slow timer period as an integer multiple of the PWM period. Outer pipeline
+      blocks run at PWM / slow-sample-div (typical 10).
 
   deadtime-ns:
     type: int

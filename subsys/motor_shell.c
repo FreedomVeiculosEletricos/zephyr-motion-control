@@ -12,6 +12,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/subsys/motor/algorithms/adrc_current/motor_algo_adrc_current.h>
 #include <zephyr/subsys/motor/algorithms/dc_current/motor_algo_dc_current.h>
+#include <zephyr/subsys/motor/algorithms/velocity_pi/motor_algo_velocity_pi.h>
 #include <zephyr/subsys/motor/motor.h>
 #include <zephyr/subsys/motor/motor_subsys.h>
 
@@ -55,6 +56,9 @@ static void print_motor_status(const struct shell *sh, struct motor_ctrl *m)
 	struct motor_dc_current_state dc_state;
 	struct motor_dc_current_pi pi;
 	struct motor_dc_current_limits lim;
+	struct motor_velocity_pi_state vel_state;
+	struct motor_velocity_pi_params vel_params;
+	struct motor_velocity_pi_limits vel_lim;
 	int r;
 
 	motor_get_status(m, &st, &fa);
@@ -103,6 +107,30 @@ static void print_motor_status(const struct shell *sh, struct motor_ctrl *m)
 	} else {
 		shell_print(sh, "  ADRC limits: n/a (%d)", r);
 	}
+
+	r = motor_algo_velocity_pi_get_params(m, &vel_params);
+	if (r == 0) {
+		r = motor_algo_velocity_pi_get_state(m, &vel_state);
+		if (r == 0) {
+			shell_print(sh,
+				    "  VEL state: v_ref=%f v_meas=%f err=%f i_ref=%f th=%f w=%f",
+				    (double)vel_state.v_ref_rad_s, (double)vel_state.v_meas_rad_s,
+				    (double)vel_state.error_rad_s, (double)vel_state.i_ref_a,
+				    (double)vel_state.theta_hat_rad,
+				    (double)vel_state.omega_hat_rad_s);
+		}
+		shell_print(sh, "  VEL PI: kp=%f ki=%f pll_kp=%f pll_ki=%f", (double)vel_params.kp,
+			    (double)vel_params.ki, (double)vel_params.pll_kp,
+			    (double)vel_params.pll_ki);
+	} else {
+		shell_print(sh, "  VEL: n/a (%d)", r);
+	}
+	r = motor_algo_velocity_pi_get_limits(m, &vel_lim);
+	if (r == 0) {
+		shell_print(sh, "  VEL limits: i_max_a=%f", (double)vel_lim.i_max_a);
+	} else {
+		shell_print(sh, "  VEL limits: n/a (%d)", r);
+	}
 }
 
 static int cmd_motor(const struct shell *sh, size_t argc, char **argv)
@@ -120,7 +148,7 @@ static int cmd_motor(const struct shell *sh, size_t argc, char **argv)
 	if (argc < 2) {
 		shell_error(
 			sh,
-			"sub: list|use|enable|disable|estop|current|selftest|status|pi|imax|adrc");
+			"sub: list|use|enable|disable|estop|current|velocity|selftest|status|pi|imax|adrc");
 		return -EINVAL;
 	}
 
@@ -179,6 +207,18 @@ static int cmd_motor(const struct shell *sh, size_t argc, char **argv)
 		}
 		if (err == -ENOTSUP) {
 			shell_error(sh, "current command not supported by selected motor algorithm");
+		}
+		return err;
+	}
+
+	if (strcmp(sub, "velocity") == 0) {
+		if (argc < 3) {
+			shell_error(sh, "velocity <rad/s>");
+			return -EINVAL;
+		}
+		err = motor_algo_velocity_pi_set_velocity(m, strtof(argv[2], NULL));
+		if (err == -ENOTSUP) {
+			shell_error(sh, "velocity command not supported by selected motor algorithm");
 		}
 		return err;
 	}
@@ -257,5 +297,5 @@ static int cmd_motor(const struct shell *sh, size_t argc, char **argv)
 }
 
 SHELL_CMD_ARG_REGISTER(motor, NULL,
-		       "Motor control: list, use, enable, current, pi, adrc, imax, …", cmd_motor,
-		       1, 8);
+		       "Motor control: list, use, enable, current, velocity, pi, adrc, imax, …",
+		       cmd_motor, 1, 8);

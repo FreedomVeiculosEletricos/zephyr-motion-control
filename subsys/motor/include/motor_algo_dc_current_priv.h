@@ -44,30 +44,24 @@ void motor_dc_current_block_set_params(struct motor_block *self);
 			.set_params = motor_dc_current_block_set_params,                         \
 		},
 
-#define MOTOR_DC_CURRENT_DATA_INITIALIZER(controller_node_id)                                       \
+#define MOTOR_DC_CURRENT_DATA_INITIALIZER(controller_node_id, algo_node_id)                         \
 	{                                                                                          \
 		MOTOR_ALGO_DC_CURRENT_BASE_INITIALIZER                                             \
 		.i_integral = 0.0f,                                                            \
 		.state = {0},                                                                  \
 		.pi = {                                                                        \
-			.kp = (float)DT_PROP(DT_PHANDLE(controller_node_id, algorithm),         \
-					     dc_current_kp_milli) / 1000.0f,                   \
-			.ki = (float)DT_PROP(DT_PHANDLE(controller_node_id, algorithm),         \
-					     dc_current_ki_milli) / 1000.0f,                   \
-			.out_min =                                                             \
-				(float)(int32_t)DT_PROP(DT_PHANDLE(controller_node_id,           \
-								   algorithm),                    \
-						 dc_current_out_min_milli) / 1000.0f,       \
-			.out_max =                                                             \
-				(float)(int32_t)DT_PROP(DT_PHANDLE(controller_node_id,           \
-								   algorithm),                    \
-						 dc_current_out_max_milli) / 1000.0f,       \
+			.kp = (float)DT_PROP(algo_node_id, dc_current_kp_milli) / 1000.0f,     \
+			.ki = (float)DT_PROP(algo_node_id, dc_current_ki_milli) / 1000.0f,     \
+			.out_min = (float)(int32_t)DT_PROP(algo_node_id,                       \
+							   dc_current_out_min_milli) /         \
+				   1000.0f,                                                    \
+			.out_max = (float)(int32_t)DT_PROP(algo_node_id,                       \
+							   dc_current_out_max_milli) /         \
+				   1000.0f,                                                    \
 		},                                                                               \
 		.limits =                                                                         \
 			{                                                                        \
-				.i_max_a = (float)DT_PROP(DT_PHANDLE(controller_node_id,          \
-								     algorithm), i_max_ma) /       \
-					   1000.0f,                                                \
+				.i_max_a = (float)DT_PROP(algo_node_id, i_max_ma) / 1000.0f,   \
 				.vbus_derating_start = 0.0f,                                     \
 				.temp_derating_start = 0.0f,                                     \
 				.temp_fault = 0.0f,                                              \
@@ -75,8 +69,9 @@ void motor_dc_current_block_set_params(struct motor_block *self);
 		.timing =                                                                        \
 			{                                                                        \
 				.control_loop_dt_s =                                             \
-					1.0f / (float)DT_PROP(DT_PHANDLE(controller_node_id,      \
-									 actuator), pwm_frequency), \
+					1.0f / (float)DT_PROP(DT_PHANDLE(controller_node_id,    \
+									 actuator),             \
+							      pwm_frequency),                    \
 			},                                                                       \
 		.ki_dt = 0.0f,                                                                   \
 	}

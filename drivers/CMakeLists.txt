@@ -5,3 +5,4 @@ zephyr_library()
 
 add_subdirectory(motor_sensor)
 add_subdirectory(motor_actuator)
+add_subdirectory(motor_encoder_observer)

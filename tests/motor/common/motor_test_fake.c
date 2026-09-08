@@ -12,10 +12,10 @@
 
 static int fake_sensor_start_sample(const struct device *dev, enum motor_sensor_channel ch)
 {
-	ARG_UNUSED(dev);
+	const struct motor_test_fake *fake = dev->data;
 
 	if (ch == MOTOR_SENSOR_CHAN_ANGLE) {
-		return -ENOTSUP;
+		return fake->angle_valid ? 0 : -ENODATA;
 	}
 	if (ch != MOTOR_SENSOR_CHAN_CURRENT) {
 		return -EINVAL;
@@ -27,6 +27,15 @@ static int fake_sensor_get_sample(const struct device *dev, enum motor_sensor_ch
 				  float *out, size_t out_len, size_t *got)
 {
 	const struct motor_test_fake *fake = dev->data;
+
+	if (ch == MOTOR_SENSOR_CHAN_ANGLE) {
+		if (!fake->angle_valid || (out_len < 1U)) {
+			return -ENODATA;
+		}
+		out[0] = fake->angle_rad;
+		*got = 1U;
+		return 0;
+	}
 
 	if (ch != MOTOR_SENSOR_CHAN_CURRENT) {
 		return -ENOTSUP;
@@ -50,7 +59,7 @@ static bool fake_sensor_channel_supported(const struct device *dev, enum motor_s
 {
 	ARG_UNUSED(dev);
 
-	return (ch == MOTOR_SENSOR_CHAN_CURRENT);
+	return (ch == MOTOR_SENSOR_CHAN_CURRENT) || (ch == MOTOR_SENSOR_CHAN_ANGLE);
 }
 
 static int fake_sensor_set_measurement_done_callback(const struct device *dev,

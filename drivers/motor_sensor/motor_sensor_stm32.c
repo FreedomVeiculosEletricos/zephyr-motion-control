@@ -16,13 +16,45 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
+#include <zephyr/drivers/clock_control.h>
+#include <zephyr/drivers/clock_control/stm32_clock_control.h>
 #include <zephyr/drivers/motor/motor_actuator.h>
 #include <zephyr/drivers/motor/motor_sensor.h>
 #include <zephyr/irq.h>
+#include <zephyr/logging/log.h>
 #if IS_ENABLED(CONFIG_SENSOR)
 #include <zephyr/drivers/sensor.h>
 #endif
 #include <zephyr/sys/util.h>
+
+LOG_MODULE_REGISTER(motor_sensor_stm32, CONFIG_MOTOR_DRIVER_LOG_LEVEL);
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+/* Worst case is calibration on the slowest supported kernel clock, which still
+ * completes in tens of microseconds. Anything longer means the ADC is not
+ * clocked or is waiting on a trigger that will never come.
+ */
+#define MOTOR_STM32_ADC_TIMEOUT_US 1000U
+
+#define MOTOR_STM32_ADC_WAIT_FOR(cond, what)                                                       \
+	({                                                                                         \
+		int _err = 0;                                                                      \
+		uint32_t _left = MOTOR_STM32_ADC_TIMEOUT_US;                                       \
+                                                                                                   \
+		while (!(cond)) {                                                                  \
+			if (_left == 0U) {                                                         \
+				LOG_ERR("timed out waiting for %s", what);                         \
+				_err = -ETIMEDOUT;                                                 \
+				break;                                                             \
+			}                                                                          \
+			_left--;                                                                   \
+			k_busy_wait(1);                                                            \
+		}                                                                                  \
+		_err;                                                                              \
+	})
 
 #if defined(LL_ADC_SAMPLINGTIME_6CYCLES_5)
 #define MOTOR_STM32_ADC_SAMPLE_TIME LL_ADC_SAMPLINGTIME_6CYCLES_5
@@ -44,20 +76,24 @@ static int motor_sensor_stm32_check_adc_pwm_margin(const struct device *sync_act
 	uint32_t cyc;
 
 	if (stage == NULL) {
+		LOG_ERR("sync actuator has no stage config");
 		return -EINVAL;
 	}
 
 	pwm_ns = stage->pwm_period_ns;
 	if (pwm_ns == 0U) {
+		LOG_ERR("sync actuator reports a zero PWM period");
 		return -EINVAL;
 	}
 
 	if ((NSEC_PER_SEC % pwm_ns) != 0ULL) {
+		LOG_ERR("PWM period %llu ns does not divide one second", pwm_ns);
 		return -EINVAL;
 	}
 
 	adc_ker_hz = SystemCoreClock;
 	if (adc_ker_hz < 1000000U) {
+		LOG_ERR("core clock %u Hz is too slow to sample current", adc_ker_hz);
 		return -EINVAL;
 	}
 
@@ -65,6 +101,8 @@ static int motor_sensor_stm32_check_adc_pwm_margin(const struct device *sync_act
 	tconv_ns = ((uint64_t)cyc * (uint64_t)NSEC_PER_SEC) / (uint64_t)adc_ker_hz;
 
 	if (tconv_ns >= pwm_ns) {
+		LOG_ERR("conversion of %u channels takes %llu ns, PWM period is %llu ns",
+			n_adc_channels, tconv_ns, pwm_ns);
 		return -EIO;
 	}
 
@@ -75,10 +113,45 @@ struct motor_sensor_stm32_config {
 	ADC_TypeDef *adc;
 	const struct device *sync_actuator;
 	const struct device *feedback_sensor;
+	const struct stm32_pclken *pclken;
+	size_t pclk_len;
+	uint32_t adc_common_clock;
 	float amps_per_volt;
 	uint32_t vref_mv;
 	uint8_t resolution_bits;
 };
+
+/* The ADC is driven straight through LL here, so nothing else in the system
+ * gates its clock: enabling it is part of this driver's init.
+ */
+static int motor_sensor_stm32_enable_adc_clock(const struct motor_sensor_stm32_config *cfg)
+{
+	const struct device *clk = DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE);
+	size_t i;
+	int err;
+
+	if (!device_is_ready(clk)) {
+		LOG_ERR("clock controller not ready");
+		return -ENODEV;
+	}
+
+	err = clock_control_on(clk, (clock_control_subsys_t)&cfg->pclken[0]);
+	if (err != 0) {
+		LOG_ERR("could not enable the ADC bus clock (%d)", err);
+		return err;
+	}
+
+	/* Further entries select the kernel clock and its RCC prescaler. */
+	for (i = 1U; i < cfg->pclk_len; i++) {
+		err = clock_control_configure(clk, (clock_control_subsys_t)&cfg->pclken[i], NULL);
+		if (err != 0) {
+			LOG_ERR("could not configure ADC clock %u (%d)", (unsigned int)i, err);
+			return err;
+		}
+	}
+
+	return 0;
+}
 
 struct motor_sensor_stm32_data {
 	uint32_t adc_ch_decimal[MOTOR_SENSOR_CURRENT_MAX];
@@ -156,23 +229,38 @@ static uint32_t inj_seq_len_from_n(uint8_t n)
 	}
 }
 
-static int adc_inj_configure(ADC_TypeDef *adc, const uint32_t *ch_decimal, uint8_t n,
-			     uint8_t resolution_bits)
+static int adc_inj_configure(ADC_TypeDef *adc, uint32_t common_clock, const uint32_t *ch_decimal,
+			     uint8_t n, uint8_t resolution_bits)
 {
 	uint8_t i;
 	uint32_t ll_resolution;
+	int err;
 
 	if ((adc == NULL) || (ch_decimal == NULL) || (n == 0U) || (n > 4U)) {
 		return -EINVAL;
 	}
 	if (stm32_ll_adc_resolution_from_bits(resolution_bits, &ll_resolution) != 0) {
+		LOG_ERR("unsupported ADC resolution of %u bits", resolution_bits);
 		return -EINVAL;
 	}
 
-	LL_ADC_SetCommonClock(__LL_ADC_COMMON_INSTANCE(adc), LL_ADC_CLOCK_ASYNC_DIV1);
+	LL_ADC_SetCommonClock(__LL_ADC_COMMON_INSTANCE(adc), common_clock);
 	LL_ADC_DisableDeepPowerDown(adc);
 	LL_ADC_EnableInternalRegulator(adc);
 	k_busy_wait(LL_ADC_DELAY_INTERNAL_REGUL_STAB_US);
+
+	/* Calibration is only latched with ADEN cleared. Reconfiguring an ADC
+	 * that is already converting (calibrate() comes back here per channel)
+	 * would otherwise start a calibration that never runs.
+	 */
+	if (LL_ADC_IsEnabled(adc) != 0UL) {
+		LL_ADC_Disable(adc);
+	}
+	err = MOTOR_STM32_ADC_WAIT_FOR(LL_ADC_IsDisableOngoing(adc) == 0UL, "the ADC to stop");
+	if (err != 0) {
+		return err;
+	}
+
 #if defined(LL_ADC_CALIB_OFFSET)
 	LL_ADC_StartCalibration(adc, LL_ADC_CALIB_OFFSET, LL_ADC_SINGLE_ENDED);
 #elif defined(LL_ADC_SINGLE_ENDED)
@@ -180,10 +268,9 @@ static int adc_inj_configure(ADC_TypeDef *adc, const uint32_t *ch_decimal, uint8
 #else
 	LL_ADC_StartCalibration(adc);
 #endif
-	while (LL_ADC_IsCalibrationOnGoing(adc) != 0UL) {
-	}
-	LL_ADC_Disable(adc);
-	while (LL_ADC_IsDisableOngoing(adc)) {
+	err = MOTOR_STM32_ADC_WAIT_FOR(LL_ADC_IsCalibrationOnGoing(adc) == 0UL, "ADC calibration");
+	if (err != 0) {
+		return err;
 	}
 
 	LL_ADC_SetResolution(adc, ll_resolution);
@@ -200,8 +287,11 @@ static int adc_inj_configure(ADC_TypeDef *adc, const uint32_t *ch_decimal, uint8
 
 	LL_ADC_INJ_SetSequencerLength(adc, inj_seq_len_from_n(n));
 	LL_ADC_INJ_SetTrigAuto(adc, LL_ADC_INJ_TRIG_INDEPENDENT);
+	/* Conversions are started from the PWM update ISR, so JEXTEN must stay
+	 * cleared. Programming a trigger edge here shares the same register
+	 * field and would arm an external trigger that never fires.
+	 */
 	LL_ADC_INJ_SetTriggerSource(adc, LL_ADC_INJ_TRIG_SOFTWARE);
-	LL_ADC_INJ_SetTriggerEdge(adc, LL_ADC_INJ_TRIG_EXT_RISING);
 
 	for (i = 0U; i < n; i++) {
 		uint32_t ch = __LL_ADC_DECIMAL_NB_TO_CHANNEL(ch_decimal[i]);
@@ -211,7 +301,9 @@ static int adc_inj_configure(ADC_TypeDef *adc, const uint32_t *ch_decimal, uint8
 	}
 
 	LL_ADC_Enable(adc);
-	while (LL_ADC_IsActiveFlag_ADRDY(adc) == 0) {
+	err = MOTOR_STM32_ADC_WAIT_FOR(LL_ADC_IsActiveFlag_ADRDY(adc) != 0UL, "the ADC to be ready");
+	if (err != 0) {
+		return err;
 	}
 	LL_ADC_ClearFlag_ADRDY(adc);
 	LL_ADC_EnableIT_JEOC(adc);
@@ -221,22 +313,39 @@ static int adc_inj_configure(ADC_TypeDef *adc, const uint32_t *ch_decimal, uint8
 
 static int adc_inj_sw_read(ADC_TypeDef *adc, uint8_t n, uint16_t *raw_out)
 {
+	bool jeoc_irq_enabled;
 	uint8_t i;
+	int err;
 
 	if ((adc == NULL) || (raw_out == NULL) || (n == 0U) || (n > 4U)) {
 		return -EINVAL;
 	}
 
-	LL_ADC_INJ_StartConversion(adc);
-	while (LL_ADC_IsActiveFlag_JEOC(adc) == 0UL) {
+	/* The latch ISR acknowledges JEOC as soon as it fires, so it has to be
+	 * masked while a thread polls the very same flag.
+	 */
+	jeoc_irq_enabled = LL_ADC_IsEnabledIT_JEOC(adc) != 0UL;
+	if (jeoc_irq_enabled) {
+		LL_ADC_DisableIT_JEOC(adc);
 	}
+
 	LL_ADC_ClearFlag_JEOC(adc);
+	LL_ADC_INJ_StartConversion(adc);
+	err = MOTOR_STM32_ADC_WAIT_FOR(LL_ADC_IsActiveFlag_JEOC(adc) != 0UL,
+				       "the injected conversion");
+	if (err == 0) {
+		LL_ADC_ClearFlag_JEOC(adc);
 
-	for (i = 0U; i < n; i++) {
-		raw_out[i] = LL_ADC_INJ_ReadConversionData12(adc, inj_rank[i]);
+		for (i = 0U; i < n; i++) {
+			raw_out[i] = LL_ADC_INJ_ReadConversionData12(adc, inj_rank[i]);
+		}
 	}
 
-	return 0;
+	if (jeoc_irq_enabled) {
+		LL_ADC_EnableIT_JEOC(adc);
+	}
+
+	return err;
 }
 
 static void adc_latch_isr(const struct device *dev)
@@ -299,7 +408,9 @@ static int motor_sensor_stm32_start_sample(const struct device *dev, enum motor_
 				if (err != 0) {
 					return err;
 				}
-				data->angle_rad = (float)sensor_value_to_double(&val);
+				/* SENSOR_CHAN_ROTATION is degrees; store radians. */
+				data->angle_rad = (float)sensor_value_to_double(&val) *
+						  ((float)M_PI / 180.0f);
 			}
 		}
 		return 0;
@@ -358,16 +469,18 @@ static int motor_sensor_stm32_calibrate(const struct device *dev, enum motor_sen
 
 	for (i = 0U; i < data->n_adc_channels; i++) {
 		float sum = 0.0f;
+		int err;
 		int s;
+
+		err = adc_inj_configure(cfg->adc, cfg->adc_common_clock, &data->adc_ch_decimal[i],
+					1, cfg->resolution_bits);
+		if (err != 0) {
+			return err;
+		}
 
 		for (s = 0; s < 32; s++) {
 			uint16_t raw;
-			int err = adc_inj_configure(cfg->adc, &data->adc_ch_decimal[i], 1,
-						    cfg->resolution_bits);
 
-			if (err != 0) {
-				return err;
-			}
 			err = adc_inj_sw_read(cfg->adc, 1, &raw);
 			if (err != 0) {
 				return err;
@@ -379,8 +492,8 @@ static int motor_sensor_stm32_calibrate(const struct device *dev, enum motor_sen
 		data->current_offset[i] = sum * (1.0f / 32.0f);
 	}
 
-	return adc_inj_configure(cfg->adc, data->adc_ch_decimal, data->n_adc_channels,
-				 cfg->resolution_bits);
+	return adc_inj_configure(cfg->adc, cfg->adc_common_clock, data->adc_ch_decimal,
+				 data->n_adc_channels, cfg->resolution_bits);
 }
 
 static bool motor_sensor_stm32_channel_supported(const struct device *dev,
@@ -423,6 +536,22 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 };
 
 #define ADC_FROM_PHANDLE(inst) ((ADC_TypeDef *)DT_REG_ADDR(DT_INST_PHANDLE(inst, adc)))
+
+/* Mirror what the Zephyr ADC driver derives from st,adc-clock-source and
+ * st,adc-prescaler, so a board that clocks its ADC synchronously keeps that
+ * setting instead of being forced onto an asynchronous source that may have no
+ * PLL feeding it.
+ */
+#define SENSOR_STM32_ADC_CLOCK_PREFIX(inst)                                                        \
+	COND_CODE_1(IS_EQ(DT_STRING_UPPER_TOKEN(DT_INST_PHANDLE(inst, adc), st_adc_clock_source),   \
+			  SYNC),                                                                   \
+		    (LL_ADC_CLOCK_SYNC_PCLK_DIV), (LL_ADC_CLOCK_ASYNC_DIV))
+
+#define SENSOR_STM32_ADC_COMMON_CLOCK(inst)                                                        \
+	COND_CODE_1(DT_NODE_HAS_PROP(DT_INST_PHANDLE(inst, adc), st_adc_clock_source),              \
+		    (CONCAT(SENSOR_STM32_ADC_CLOCK_PREFIX(inst),                                   \
+			    DT_PROP(DT_INST_PHANDLE(inst, adc), st_adc_prescaler))),                \
+		    (LL_ADC_CLOCK_ASYNC_DIV1))
 #define SENSOR_STM32_ADC_IRQN(inst) DT_IRQ_BY_IDX(DT_INST_PHANDLE(inst, adc), 0, irq)
 #define SENSOR_STM32_ADC_IRQ_PRIO(inst)                                                         \
 	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, zephyr_adc_irq_priority),                      \
@@ -435,9 +564,14 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 	BUILD_ASSERT(DT_INST_PROP_LEN(inst, adc_channels) >= 1);                                     \
 	BUILD_ASSERT(DT_INST_PROP_LEN(inst, adc_channels) <= MOTOR_SENSOR_CURRENT_MAX);              \
 	static const uint32_t motor_sensor_stm32_adc_ch_##inst[] = DT_INST_PROP(inst, adc_channels); \
+	static const struct stm32_pclken motor_sensor_stm32_pclken_##inst[] =                      \
+		STM32_DT_CLOCKS(DT_INST_PHANDLE(inst, adc));                                       \
 	static const struct motor_sensor_stm32_config motor_sensor_stm32_cfg_##inst = {            \
 		.adc = ADC_FROM_PHANDLE(inst),                                                     \
 		.sync_actuator = DEVICE_DT_GET(DT_INST_PHANDLE(inst, sync_actuator)),              \
+		.pclken = motor_sensor_stm32_pclken_##inst,                                        \
+		.pclk_len = ARRAY_SIZE(motor_sensor_stm32_pclken_##inst),                          \
+		.adc_common_clock = SENSOR_STM32_ADC_COMMON_CLOCK(inst),                           \
 		.feedback_sensor =                                                                   \
 			COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, feedback_sensor),                    \
 				    (DEVICE_DT_GET(DT_INST_PHANDLE(inst, feedback_sensor))),         \
@@ -460,10 +594,17 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 		int err;                                                                           \
 		uint8_t i;                                                                         \
 		if (!device_is_ready(cfg->sync_actuator)) {                                        \
+			LOG_ERR("sync actuator %s is not ready", cfg->sync_actuator->name);         \
 			return -ENODEV;                                                            \
 		}                                                                                  \
 		if ((cfg->feedback_sensor != NULL) && !device_is_ready(cfg->feedback_sensor)) {   \
+			LOG_ERR("feedback sensor %s is not ready, check its init priority",        \
+				cfg->feedback_sensor->name);                                       \
 			return -ENODEV;                                                            \
+		}                                                                                  \
+		err = motor_sensor_stm32_enable_adc_clock(cfg);                                    \
+		if (err != 0) {                                                                    \
+			return err;                                                                \
 		}                                                                                  \
 		data->n_adc_channels = (uint8_t)DT_INST_PROP_LEN(inst, adc_channels);                \
 		for (i = 0U; i < data->n_adc_channels; i++) {                                      \
@@ -481,8 +622,8 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 		data->measurement_done_cb = NULL;                                                  \
 		data->measurement_done_user_data = NULL;                                           \
 		data->angle_rad = 0.0f;                                                            \
-		err = adc_inj_configure(cfg->adc, data->adc_ch_decimal, data->n_adc_channels,        \
-					cfg->resolution_bits);                                       \
+		err = adc_inj_configure(cfg->adc, cfg->adc_common_clock, data->adc_ch_decimal,      \
+					data->n_adc_channels, cfg->resolution_bits);                 \
 		if (err != 0) {                                                                    \
 			return err;                                                                \
 		}                                                                                  \

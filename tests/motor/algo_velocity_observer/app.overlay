@@ -1,0 +1,57 @@
+/ {
+	observer_motor: motor-controller {
+		compatible = "zephyr,motor-controller";
+		status = "okay";
+
+		sensor = <&observer_sensor>;
+		actuator = <&observer_actuator>;
+		algorithm = <&velocity_observer_algo &adrc_current_algo>;
+	};
+
+	velocity_observer_algo: motor-algorithm-velocity-observer {
+		compatible = "zephyr,motor-algorithm-velocity-observer";
+		status = "okay";
+
+		motor-resistance-mohm = <1000>;
+		motor-inductance-uh = <1000>;
+		motor-ke-uv-per-rad-s = <50000>;
+		vbus-nominal-mv = <12000>;
+		observer-bandwidth-rad-s = <3000>;
+		pll-kp-milli = <100>;
+		pll-ki-milli = <200000>;
+		valid-threshold-mrad-s = <20000>;
+		valid-release-mrad-s = <15000>;
+		settle-ticks = <100>;
+		sensor-sink = <&observer_encoder>;
+	};
+
+	adrc_current_algo: motor-algorithm-adrc-current {
+		compatible = "zephyr,motor-algorithm-adrc-current";
+		status = "okay";
+
+		adrc-current-kp-milli = <1000>;
+		adrc-current-b0-milli = <1000>;
+		adrc-current-beta1-milli = <0>;
+		adrc-current-beta2-milli = <0>;
+		adrc-current-out-min-milli = <(-1000)>;
+		adrc-current-out-max-milli = <1000>;
+		i-max-ma = <5000>;
+	};
+
+	observer_encoder: motor-encoder-observer {
+		compatible = "zephyr,motor-encoder-observer";
+		status = "okay";
+	};
+
+	observer_sensor: motor-test-sensor {
+		compatible = "zephyr,motor-test-sensor";
+		status = "okay";
+	};
+
+	observer_actuator: motor-test-actuator {
+		compatible = "zephyr,motor-test-actuator";
+		status = "okay";
+		pwm-frequency = <20000>;
+		slow-sample-div = <10>;
+	};
+};

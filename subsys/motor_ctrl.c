@@ -25,6 +25,10 @@ static void motor_ctrl_run_inner(struct motor_ctrl *ctrl, const struct motor_sen
 {
 	struct motor_block_in in = {
 		.sense = sense,
+		.has_current_ref = ctrl->cascaded_current_ref_valid,
+		.current_ref_a = ctrl->cascaded_current_ref_a,
+		.has_applied_u = ctrl->last_applied_u_valid,
+		.applied_u = ctrl->last_applied_u,
 	};
 
 	motor_pipeline_run_stage(ctrl->pipeline, ctrl->pipeline_ctx, MOTOR_STAGE_INNER_ISR,
@@ -76,6 +80,10 @@ int motor_ctrl_init(struct motor_ctrl *ctrl, const struct device *sensor,
 	ctrl->pipeline_ctx = pipeline_ctx;
 	ctrl->state = MOTOR_STATE_IDLE;
 	ctrl->inner_rate_hz = inner_rate_hz;
+	ctrl->cascaded_current_ref_a = 0.0f;
+	ctrl->cascaded_current_ref_valid = false;
+	ctrl->last_applied_u = 0.0f;
+	ctrl->last_applied_u_valid = false;
 
 	err = motor_pipeline_init(pipeline, pipeline_ctx);
 	if (err != 0) {
@@ -131,6 +139,10 @@ static void motor_ctrl_hot_pwm_isr(const struct device *actuator, void *user_dat
 	if (out.n_duty != 0U) {
 		(void)motor_actuator_set_duty(actuator, out.duty, out.n_duty);
 	}
+	if (out.has_applied_u) {
+		ctrl->last_applied_u = out.applied_u;
+		ctrl->last_applied_u_valid = true;
+	}
 	(void)motor_sensor_start_sample(ctrl->sensor, MOTOR_SENSOR_CHAN_CURRENT);
 	ctrl->inner_stage_tick++;
 }
@@ -152,11 +164,43 @@ static void motor_ctrl_slow_thread(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p3);
 
 	for (;;) {
+		struct motor_sense_bundle sense;
+		struct motor_block_in in;
+		struct motor_block_out out = {0};
+		size_t got = 0U;
+		int err;
+
 		k_sem_take(&ctrl->slow_tick_sem, K_FOREVER);
 		if (ctrl->state != MOTOR_STATE_RUN) {
 			continue;
 		}
-		(void)motor_sensor_start_sample(ctrl->sensor, MOTOR_SENSOR_CHAN_ANGLE);
+
+		sense = ctrl->last_sense;
+		if (motor_sensor_channel_supported(ctrl->sensor, MOTOR_SENSOR_CHAN_ANGLE)) {
+			err = motor_sensor_start_sample(ctrl->sensor, MOTOR_SENSOR_CHAN_ANGLE);
+			if (err == 0) {
+				err = motor_sensor_get_sample(ctrl->sensor, MOTOR_SENSOR_CHAN_ANGLE,
+							      &sense.angle_rad, 1U, &got);
+				sense.angle_valid = (err == 0) && (got == 1U);
+			} else {
+				sense.angle_valid = false;
+			}
+			ctrl->last_sense.angle_rad = sense.angle_rad;
+			ctrl->last_sense.angle_valid = sense.angle_valid;
+		}
+
+		in.sense = &sense;
+		in.has_current_ref = false;
+		in.current_ref_a = 0.0f;
+
+		motor_pipeline_run_stage(ctrl->pipeline, ctrl->pipeline_ctx, MOTOR_STAGE_OUTER,
+					 ctrl->slow_stage_tick, &in, &out);
+
+		if (out.has_current_ref) {
+			ctrl->cascaded_current_ref_a = out.current_ref_a;
+			ctrl->cascaded_current_ref_valid = true;
+		}
+
 		ctrl->slow_stage_tick++;
 	}
 }
@@ -197,6 +241,8 @@ int motor_ctrl_enable(struct motor_ctrl *ctrl)
 
 	k_mutex_lock(&ctrl->lock, K_FOREVER);
 	motor_pipeline_reset(ctrl->pipeline, ctrl->pipeline_ctx);
+	ctrl->last_applied_u = 0.0f;
+	ctrl->last_applied_u_valid = false;
 	err = motor_actuator_enable(ctrl->actuator);
 	if (err == 0) {
 		(void)motor_sensor_start_sample(ctrl->sensor, MOTOR_SENSOR_CHAN_CURRENT);
