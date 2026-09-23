@@ -1,5 +1,7 @@
-{ pkgs, inputs }:
+{ inputs, pkgs }:
 inputs.treefmt-nix.lib.mkWrapper pkgs {
+  imports = [ inputs.pedantix.treefmtModules.default ];
+
   projectRootFile = "flake.nix";
 
   programs = {
@@ -8,7 +10,7 @@ inputs.treefmt-nix.lib.mkWrapper pkgs {
       enable = true;
       package = pkgs.clang-tools_19;
     };
-    nixpkgs-fmt.enable = true;
+    pedantix.enable = true;
     shfmt.enable = true;
   };
 

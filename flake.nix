@@ -1,5 +1,6 @@
 {
   inputs = {
+    pedantix.url = "github:Swarsel/pedantix";
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
 
     blueprint.url = "github:numtide/blueprint";
@@ -15,7 +16,8 @@
     };
   };
 
-  outputs = inputs:
+  outputs =
+    inputs:
     inputs.blueprint {
       inherit inputs;
       prefix = "nix";
