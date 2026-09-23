@@ -45,6 +45,13 @@ pkgs.mkShell {
     # Force Zephyr/west to use the Nix Python (≥3.12), not /usr/bin/python3.
     export WEST_PYTHON="${pythonEnv}/bin/python3"
     # Prefer Nix cmake/ninja and Zephyr hosttools over ~/.local.
-    export PATH="${pkgs.lib.makeBinPath [ pythonEnv pkgs.cmake pkgs.ninja zephyr.hosttools ]}:$PATH"
+    export PATH="${
+      pkgs.lib.makeBinPath [
+        pythonEnv
+        pkgs.cmake
+        pkgs.ninja
+        zephyr.hosttools
+      ]
+    }:$PATH"
   '';
 }
