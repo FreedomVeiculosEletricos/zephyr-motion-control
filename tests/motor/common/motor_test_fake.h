@@ -19,6 +19,8 @@ struct motor_test_fake {
 
 	float sensor_samples[MOTOR_SENSOR_CURRENT_MAX];
 	size_t sensor_sample_count;
+	float angle_rad;
+	bool angle_valid;
 
 	motor_sensor_measurement_done_cb_t sensor_measurement_done_cb;
 	void *sensor_measurement_done_user_data;

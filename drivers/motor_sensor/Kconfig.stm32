@@ -6,14 +6,20 @@
 config MOTOR_SENSOR_STM32
 	bool "STM32 motor sensor (zephyr,motor-sensor-stm32)"
 	depends on SOC_FAMILY_STM32
+	depends on CLOCK_CONTROL
 	select ZERO_LATENCY_IRQS
 	help
 	  Current sense via LL ADC injected group; JEOC ISR latches samples.
+	  The driver owns the ADC: it gates the peripheral clock itself and
+	  does not need the Zephyr ADC driver.
 
 config MOTOR_SENSOR_STM32_INIT_PRIORITY
 	int "Init priority for zephyr,motor-sensor-stm32"
-	default 46
+	default 95
 	depends on MOTOR_SENSOR_STM32
+	help
+	  Must run after the power stage and after any feedback sensor named by
+	  the feedback-sensor property, which init at SENSOR_INIT_PRIORITY.
 
 config MOTOR_STM32_ADC_IRQ_PRIORITY
 	int "Default NVIC priority for ADC JEOC ISR (STM32 sensor)"

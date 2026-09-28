@@ -6,12 +6,15 @@
 config MOTOR_STAGE_HBRIDGE_STM32
 	bool "STM32 LL H-bridge (zephyr,motor-stage-hbridge-stm32)"
 	depends on SOC_FAMILY_STM32
+	depends on CLOCK_CONTROL
 	depends on COUNTER
 	depends on GPIO
 	select PINCTRL
 	select ZERO_LATENCY_IRQS
 	help
 	  H-bridge using STM32 LL timers (no Zephyr PWM on the hot path).
+	  The driver owns the PWM timer: it gates the peripheral clock itself
+	  and does not need the Zephyr PWM driver.
 
 config MOTOR_STAGE_HBRIDGE_STM32_INIT_PRIORITY
 	int "Init priority for motor-stage-hbridge-stm32"

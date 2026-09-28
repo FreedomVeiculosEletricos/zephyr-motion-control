@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: Test-only motor actuator binding for native_sim unit tests.
+
+compatible: "zephyr,motor-test-actuator"
+
+include: base.yaml
+
+properties:
+  pwm-frequency:
+    type: int
+    required: true
+    description: Fake actuator PWM frequency in Hz.
+
+  slow-sample-div:
+    type: int
+    default: 10
+    description: Outer-loop rate divisor relative to PWM period.

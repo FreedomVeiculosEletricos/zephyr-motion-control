@@ -19,7 +19,16 @@ config MOTOR_CONTROL_LIB
 		    (MOTOR_SENSOR_STM32 || MOTOR_SENSOR_ESP32)))
 	help
 	  Builds motor_ctrl, motor_* API, and in-tree algorithm backends
-	  (dc-current and adrc-current).
+	  (dc-current, adrc-current, velocity-pi).
+
+config MOTOR_ALGO_VELOCITY_OBSERVER
+	bool "Sensorless velocity observer algorithm block"
+	depends on MOTOR_CONTROL_LIB
+	default y
+	help
+	  Back-EMF observer that estimates brushed DC rotor speed from the
+	  measured current, for use with zephyr,motor-algorithm-velocity-observer
+	  nodes. Costs an extra second-order update in the PWM ISR.
 
 config MOTOR_SUBSYS
 	bool "Motor multi-instance DT registration (motor_subsys_* API)"

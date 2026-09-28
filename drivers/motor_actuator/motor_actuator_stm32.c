@@ -15,40 +15,26 @@
 #include <errno.h>
 #include <stdint.h>
 
-#include <stm32_ll_bus.h>
-#include <stm32_ll_rcc.h>
 #include <stm32_ll_tim.h>
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/clock_control.h>
+#include <zephyr/drivers/clock_control/stm32_clock_control.h>
 #include <zephyr/drivers/counter.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/motor/motor_actuator.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/irq.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 
 #include "motor_actuator_common.h"
 
+LOG_MODULE_REGISTER(motor_actuator_stm32, CONFIG_MOTOR_DRIVER_LOG_LEVEL);
+
 #define HB_MAX 3U
-#if defined(__LL_RCC_CALC_HCLK_FREQ)
-#define MOTOR_RCC_CALC_HCLK_FREQ(sysclk, hpre) __LL_RCC_CALC_HCLK_FREQ((sysclk), (hpre))
-#else
-#define MOTOR_RCC_CALC_HCLK_FREQ(sysclk, hpre) LL_RCC_CALC_HCLK_FREQ((sysclk), (hpre))
-#endif
-
-#if defined(__LL_RCC_CALC_PCLK1_FREQ)
-#define MOTOR_RCC_CALC_PCLK1_FREQ(hclk, ppre) __LL_RCC_CALC_PCLK1_FREQ((hclk), (ppre))
-#else
-#define MOTOR_RCC_CALC_PCLK1_FREQ(hclk, ppre) LL_RCC_CALC_PCLK1_FREQ((hclk), (ppre))
-#endif
-
-#if defined(__LL_RCC_CALC_PCLK2_FREQ)
-#define MOTOR_RCC_CALC_PCLK2_FREQ(hclk, ppre) __LL_RCC_CALC_PCLK2_FREQ((hclk), (ppre))
-#else
-#define MOTOR_RCC_CALC_PCLK2_FREQ(hclk, ppre) LL_RCC_CALC_PCLK2_FREQ((hclk), (ppre))
-#endif
 
 /* Custom pinctrl state IDs picked up by Z_PINCTRL_STATE_ID via "complementary"
  * and "single-ended" entries in pinctrl-names.
@@ -58,6 +44,8 @@
 
 struct motor_actuator_stm32_config {
 	TIM_TypeDef *tim;
+	const struct stm32_pclken *pclken;
+	size_t pclk_len;
 	const uint8_t *pwm_ch;
 	uint8_t n_half_bridges;
 	bool single_ended;
@@ -121,36 +109,48 @@ static bool tim_is_advanced(const TIM_TypeDef *tim)
 	       (tim == TIM17);
 }
 
-static uint32_t tim_clock_hz(const TIM_TypeDef *tim)
+/* The timer is programmed straight through LL, so nothing else in the system
+ * gates its clock: enabling it is part of this driver's init.
+ */
+static int motor_actuator_stm32_enable_tim_clock(const struct motor_actuator_stm32_config *cfg,
+						 uint32_t *rate_hz)
 {
-	uint32_t hclk;
-	uint32_t pclk;
-	uint32_t apre;
+	const struct device *clk = DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE);
+	int err;
 
-	hclk = MOTOR_RCC_CALC_HCLK_FREQ(SystemCoreClock, LL_RCC_GetAHBPrescaler());
+	if (!device_is_ready(clk)) {
+		LOG_ERR("clock controller not ready");
+		return -ENODEV;
+	}
 
-	if ((tim == TIM1) || (tim == TIM8) || (tim == TIM15) || (tim == TIM16) || (tim == TIM17)) {
-		apre = LL_RCC_GetAPB2Prescaler();
-		pclk = MOTOR_RCC_CALC_PCLK2_FREQ(hclk, apre);
-		if (apre != LL_RCC_APB2_DIV_1) {
-			return pclk * 2U;
+	err = clock_control_on(clk, (clock_control_subsys_t)&cfg->pclken[0]);
+	if (err != 0) {
+		LOG_ERR("could not enable the timer bus clock (%d)", err);
+		return err;
+	}
+
+	if (cfg->pclk_len > 1U) {
+		err = clock_control_configure(clk, (clock_control_subsys_t)&cfg->pclken[1], NULL);
+		if (err != 0) {
+			LOG_ERR("could not select the timer clock source (%d)", err);
+			return err;
 		}
-		return pclk;
 	}
 
-	apre = LL_RCC_GetAPB1Prescaler();
-	pclk = MOTOR_RCC_CALC_PCLK1_FREQ(hclk, apre);
-	if (apre != LL_RCC_APB1_DIV_1) {
-		return pclk * 2U;
+	err = clock_control_get_rate(clk, (clock_control_subsys_t)&cfg->pclken[cfg->pclk_len - 1U],
+				     rate_hz);
+	if (err != 0) {
+		LOG_ERR("could not read the timer clock rate (%d)", err);
+		return err;
 	}
-	return pclk;
+
+	return 0;
 }
 
 /** Encode dead-time for BDTR DTG[7:0] — t_dt = DTG * t_dts, t_dts = 1 / tim_clk. */
-static uint8_t encode_deadtime(TIM_TypeDef *tim, uint32_t deadtime_ns)
+static uint8_t encode_deadtime(uint32_t tim_clk_hz, uint32_t deadtime_ns)
 {
-	uint64_t clk = (uint64_t)tim_clock_hz((const TIM_TypeDef *)tim);
-	uint64_t ticks = (deadtime_ns * clk) / 1000000000ULL;
+	uint64_t ticks = ((uint64_t)deadtime_ns * (uint64_t)tim_clk_hz) / 1000000000ULL;
 
 	if (ticks > 255ULL) {
 		return 255U;
@@ -226,18 +226,18 @@ static void oc_set_complementary_pwm(TIM_TypeDef *tim, uint8_t ch, uint32_t puls
 	LL_TIM_CC_EnableChannel(tim, pair);
 }
 
-static int tim_base_init(TIM_TypeDef *tim, uint32_t freq_hz, uint32_t *arr_out)
+static int tim_base_init(TIM_TypeDef *tim, uint32_t tim_clk, uint32_t freq_hz, uint32_t *arr_out)
 {
-	uint32_t tim_clk = tim_clock_hz((const TIM_TypeDef *)tim);
 	uint32_t psc = 0U;
 	uint32_t arr;
 
-	if ((tim == NULL) || (freq_hz == 0U)) {
+	if ((tim == NULL) || (freq_hz == 0U) || (tim_clk == 0U)) {
 		return -EINVAL;
 	}
 
 	arr = tim_clk / freq_hz;
 	if (arr == 0U) {
+		LOG_ERR("PWM frequency %u Hz is above the %u Hz timer clock", freq_hz, tim_clk);
 		return -EINVAL;
 	}
 	arr -= 1U;
@@ -263,14 +263,14 @@ static int tim_base_init(TIM_TypeDef *tim, uint32_t freq_hz, uint32_t *arr_out)
 	return 0;
 }
 
-static int tim_gp_pwm_init(TIM_TypeDef *tim, uint32_t freq_hz, const uint8_t *ch, uint8_t n_ch,
-			   uint32_t trgo, uint32_t *max_duty_out)
+static int tim_gp_pwm_init(TIM_TypeDef *tim, uint32_t tim_clk, uint32_t freq_hz, const uint8_t *ch,
+			   uint8_t n_ch, uint32_t trgo, uint32_t *max_duty_out)
 {
 	int err;
 	uint32_t arr;
 	uint8_t i;
 
-	err = tim_base_init(tim, freq_hz, &arr);
+	err = tim_base_init(tim, tim_clk, freq_hz, &arr);
 	if (err != 0) {
 		return err;
 	}
@@ -290,20 +290,21 @@ static int tim_gp_pwm_init(TIM_TypeDef *tim, uint32_t freq_hz, const uint8_t *ch
 	return 0;
 }
 
-static int tim_hbridge_init(TIM_TypeDef *tim, uint32_t freq_hz, const uint8_t *ch, uint8_t n_ch,
-			    uint32_t deadtime_ns, uint32_t trgo, uint32_t *max_duty_out)
+static int tim_hbridge_init(TIM_TypeDef *tim, uint32_t tim_clk, uint32_t freq_hz, const uint8_t *ch,
+			    uint8_t n_ch, uint32_t deadtime_ns, uint32_t trgo,
+			    uint32_t *max_duty_out)
 {
 	int err;
 	uint32_t arr;
 	uint8_t dtg;
 	uint8_t i;
 
-	err = tim_base_init(tim, freq_hz, &arr);
+	err = tim_base_init(tim, tim_clk, freq_hz, &arr);
 	if (err != 0) {
 		return err;
 	}
 
-	dtg = encode_deadtime(tim, deadtime_ns);
+	dtg = encode_deadtime(tim_clk, deadtime_ns);
 	LL_TIM_OC_SetDeadTime(tim, dtg);
 
 	for (i = 0U; i < n_ch; i++) {
@@ -543,7 +544,9 @@ static int motor_actuator_stm32_hw_init(const struct device *dev)
 {
 	const struct motor_actuator_stm32_config *cfg = dev->config;
 	struct motor_actuator_stm32_data *data = dev->data;
+	uint32_t tim_clk_hz;
 	uint64_t slow_ticks;
+	uint32_t slow_top;
 	int err;
 
 	data->self = dev;
@@ -551,25 +554,36 @@ static int motor_actuator_stm32_hw_init(const struct device *dev)
 	data->running = false;
 	atomic_clear(&data->slow_timer_running);
 
+	err = motor_actuator_stm32_enable_tim_clock(cfg, &tim_clk_hz);
+	if (err != 0) {
+		return err;
+	}
+
 	if (cfg->single_ended && !tim_is_advanced(cfg->tim)) {
-		err = tim_gp_pwm_init(cfg->tim, cfg->pwm_freq_hz, cfg->pwm_ch, cfg->n_half_bridges,
-				      cfg->trgo, &data->max_duty);
+		err = tim_gp_pwm_init(cfg->tim, tim_clk_hz, cfg->pwm_freq_hz, cfg->pwm_ch,
+				      cfg->n_half_bridges, cfg->trgo, &data->max_duty);
 	} else {
-		err = tim_hbridge_init(cfg->tim, cfg->pwm_freq_hz, cfg->pwm_ch, cfg->n_half_bridges,
-				       cfg->deadtime_ns, cfg->trgo, &data->max_duty);
+		err = tim_hbridge_init(cfg->tim, tim_clk_hz, cfg->pwm_freq_hz, cfg->pwm_ch,
+				       cfg->n_half_bridges, cfg->deadtime_ns, cfg->trgo,
+				       &data->max_duty);
 	}
 	if (err != 0) {
 		return err;
 	}
 
 	if (!device_is_ready(cfg->slow_timer)) {
+		LOG_ERR("slow timer %s is not ready", cfg->slow_timer->name);
 		return -ENODEV;
 	}
 
 	slow_ticks = ((uint64_t)counter_get_frequency(cfg->slow_timer) *
 		      (uint64_t)cfg->stage_cfg.pwm_period_ns * (uint64_t)cfg->slow_sample_div) /
 		     (uint64_t)NSEC_PER_SEC;
-	if ((slow_ticks == 0ULL) || (slow_ticks > counter_get_top_value(cfg->slow_timer))) {
+	slow_top = counter_get_top_value(cfg->slow_timer);
+	if ((slow_ticks == 0ULL) || (slow_ticks > (uint64_t)slow_top)) {
+		LOG_ERR("outer loop period needs %llu ticks of %s, which counts up to %u; "
+			"raise its st,prescaler",
+			slow_ticks, cfg->slow_timer->name, slow_top);
 		return -EINVAL;
 	}
 	data->slow_timer_ticks = (uint32_t)slow_ticks;
@@ -669,8 +683,12 @@ const struct motor_actuator_ops motor_actuator_stm32_api = {
 		return 0;                                                                            \
 	}                                                                                            \
 	static const uint8_t pwm_ch_array_##inst[] = DT_INST_PROP(inst, pwm_channels);               \
+	static const struct stm32_pclken motor_actuator_stm32_pclken_##inst[] =                     \
+		STM32_DT_CLOCKS(MOTOR_ACTUATOR_STM32_TIMER(inst));                                 \
 	static const struct motor_actuator_stm32_config motor_actuator_stm32_cfg_##inst = {          \
 		.tim = TIM_FROM_PHANDLE(inst),                                                     \
+		.pclken = motor_actuator_stm32_pclken_##inst,                                      \
+		.pclk_len = ARRAY_SIZE(motor_actuator_stm32_pclken_##inst),                        \
 		.pwm_ch = pwm_ch_array_##inst,                                                     \
 		.n_half_bridges = (uint8_t)ARRAY_SIZE(pwm_ch_array_##inst),                        \
 		.single_ended = DT_INST_PROP_OR(inst, single_ended, 0),                            \

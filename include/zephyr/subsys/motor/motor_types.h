@@ -69,10 +69,14 @@ enum motor_drive_mode {
 };
 
 /**
- * @brief Pipeline stage for block scheduling (extend when outer blocks exist).
+ * @brief Pipeline stage for block scheduling.
+ *
+ * INNER runs in the PWM ISR; OUTER runs in the slow control thread
+ * (rate set by actuator @c slow-sample-div).
  */
 enum motor_pipeline_stage {
 	MOTOR_STAGE_INNER_ISR = 0,
+	MOTOR_STAGE_OUTER = 1,
 	MOTOR_STAGE_COUNT,
 };
 

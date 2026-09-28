@@ -1,0 +1,17 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Virtual rotation sensor fed by zephyr,motor-algorithm-velocity-observer.
+
+  It has no bus and no hardware behind it: the observer block publishes into it
+  from the control ISR and it exposes the result through the Zephyr Sensor API,
+  so it can be used as the ``feedback-sensor`` of a motor sensor in place of a
+  magnetic encoder.
+
+  It is a passive sink and references nothing, which is what keeps the
+  devicetree free of a phandle cycle with the motor sensor.
+
+compatible: "zephyr,motor-encoder-observer"
+
+include: sensor-device.yaml

@@ -64,7 +64,10 @@
 
 &timers6 {
 	status = "okay";
-	st,prescaler = <0>;
+	/* TIM6 counts 16 bits: the 500 us outer tick only fits once the timer
+	 * clock is divided down.
+	 */
+	st,prescaler = <3>;
 
 	motor_slow_counter: counter {
 		status = "okay";

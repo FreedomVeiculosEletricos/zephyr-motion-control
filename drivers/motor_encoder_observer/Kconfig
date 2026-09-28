@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Freedom Veiculos Eletricos
+# SPDX-License-Identifier: UNLICENSED
+
+config MOTOR_ENCODER_OBSERVER
+	bool "Virtual rotation sensor fed by the sensorless velocity observer"
+	default y
+	depends on DT_HAS_ZEPHYR_MOTOR_ENCODER_OBSERVER_ENABLED
+	depends on SENSOR
+	help
+	  Exposes the observer estimate through the Zephyr Sensor API so it can
+	  replace a magnetic encoder as the feedback-sensor of a motor sensor.

@@ -732,7 +732,9 @@ static int motor_sensor_esp32_start_sample(const struct device *dev, enum motor_
 				if (err != 0) {
 					return err;
 				}
-				data->angle_rad = (float)sensor_value_to_double(&val);
+				/* SENSOR_CHAN_ROTATION is degrees; store radians. */
+				data->angle_rad = (float)sensor_value_to_double(&val) *
+						  ((float)M_PI / 180.0f);
 			}
 		}
 		return 0;

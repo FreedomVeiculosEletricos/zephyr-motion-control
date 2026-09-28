@@ -5,5 +5,10 @@ menu "Motor control drivers"
 
 rsource "motor_sensor/Kconfig"
 rsource "motor_actuator/Kconfig"
+rsource "motor_encoder_observer/Kconfig"
+
+module = MOTOR_DRIVER
+module-str = motor driver
+source "subsys/logging/Kconfig.template.log_config"
 
 endmenu

@@ -1,0 +1,97 @@
+# Copyright (c) 2026 Zephyr Motor Control Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Sensorless velocity observer for brushed DC motors. Runs on the inner (PWM
+  ISR) stage, recovers the back-EMF from the measured current as a disturbance
+  state, and turns it into a smooth speed with a scalar tracking loop.
+
+  It produces no actuator command and no current reference: the estimate is
+  published to the virtual encoder pointed to by ``sensor-sink``, which the
+  motor sensor then consumes as its ``feedback-sensor``.
+
+  Place it before the current controller in the ``algorithm`` phandles list of
+  zephyr,motor-controller. The estimator always consumes the command applied on
+  the previous tick, so the order only affects when the estimate is refreshed.
+
+compatible: "zephyr,motor-algorithm-velocity-observer"
+
+include: base.yaml
+
+properties:
+  motor-resistance-mohm:
+    type: int
+    required: true
+    description: Armature resistance in milliohms.
+
+  motor-inductance-uh:
+    type: int
+    required: true
+    description: Armature inductance in microhenries.
+
+  motor-ke-uv-per-rad-s:
+    type: int
+    required: true
+    description: |
+      Back-EMF constant in microvolts per rad/s. Numerically equal to the torque
+      constant in uN.m/A for a brushed DC motor.
+
+  vbus-nominal-mv:
+    type: int
+    default: 12000
+    description: |
+      Bus voltage backing the normalized command, in millivolts. Matches the
+      nominal value assumed by the H-bridge backends; an error here scales the
+      estimate proportionally.
+
+  observer-bandwidth-rad-s:
+    type: int
+    default: 2000
+    description: |
+      Places both estimator poles at -w. Must sit well above the electrical pole
+      R/L and well below the inner loop rate; a decade below the PWM frequency
+      in rad/s is a safe starting point.
+
+  pll-kp-milli:
+    type: int
+    default: 100
+    description: |
+      Tracking loop proportional gain × 1000. Must stay below 1000: the loop
+      sees its own output one tick late, so the discrete poles sit at
+      sqrt(kp) and a unit gain oscillates without settling.
+
+  pll-ki-milli:
+    type: int
+    default: 200000
+    description: |
+      Tracking loop integral gain × 1000. The dominant pole sits near
+      ki / (1 + kp), so these defaults give roughly 180 rad/s. Also bounded by
+      ki × dt < 2 × (1 - kp) for the same discrete-time reason.
+
+  valid-threshold-mrad-s:
+    type: int
+    default: 20000
+    description: |
+      Speed in mrad/s above which the estimate becomes valid. Below it the
+      back-EMF is buried in the current offset and in the temperature drift of
+      the resistance.
+
+  valid-release-mrad-s:
+    type: int
+    default: 15000
+    description: |
+      Speed in mrad/s below which the estimate becomes invalid again. Must not
+      exceed valid-threshold-mrad-s; the gap is the hysteresis band.
+
+  settle-ticks:
+    type: int
+    default: 2000
+    description: |
+      Inner ticks held invalid after a reset, covering the convergence
+      transient. At 20 kHz, 2000 ticks is 100 ms.
+
+  sensor-sink:
+    type: phandle
+    description: |
+      zephyr,motor-encoder-observer node fed with the estimate. Omit it to run
+      the observer as pure telemetry.
