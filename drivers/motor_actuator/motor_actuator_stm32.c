@@ -27,7 +27,6 @@
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/irq.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 
 #include "motor_actuator_common.h"
@@ -82,8 +81,6 @@ struct motor_actuator_stm32_data {
 	motor_fault_cb_t fault_cb;
 	void *fault_user_data;
 	struct gpio_callback nfault_cb;
-	atomic_t slow_timer_running;
-	uint32_t slow_timer_ticks;
 	/* Cached at init: full-scale duty for oc_set_compare(), ARR + 1 when
 	 * edge-aligned and ARR when center-aligned.
 	 */
@@ -488,45 +485,21 @@ static int motor_actuator_stm32_set_drive_mode(const struct device *dev, enum mo
 	return 0;
 }
 
-static void motor_actuator_stm32_slow_alarm_cb(const struct device *counter_dev, uint8_t chan_id,
-					       uint32_t ticks, void *user_data)
+/* Wrap callback of the slow timer, which counts exactly one outer period. A
+ * one-shot alarm re-armed from the PWM ISR would not do: it falls due on a PWM
+ * tick, the re-arm lands one PWM period late, and the outer loop runs at
+ * slow-sample-div + 1 PWM periods while the algorithms integrate over
+ * slow-sample-div, which reads every speed ~10 % high at div = 10.
+ */
+static void motor_actuator_stm32_slow_tick_cb(const struct device *counter_dev, void *user_data)
 {
 	const struct device *dev = user_data;
 	struct motor_actuator_stm32_data *data = dev->data;
 
 	ARG_UNUSED(counter_dev);
-	ARG_UNUSED(chan_id);
-	ARG_UNUSED(ticks);
 
-	if (data->slow_cb != NULL) {
+	if (data->running && (data->slow_cb != NULL)) {
 		data->slow_cb(dev, data->slow_user_data);
-	}
-	atomic_clear(&data->slow_timer_running);
-}
-
-static void motor_actuator_stm32_arm_slow_timer(const struct device *dev)
-{
-	const struct motor_actuator_stm32_config *cfg = dev->config;
-	struct motor_actuator_stm32_data *data = dev->data;
-	struct counter_alarm_cfg alarm = {
-		.callback = motor_actuator_stm32_slow_alarm_cb,
-		.ticks = data->slow_timer_ticks,
-		.user_data = (void *)dev,
-		.flags = 0U,
-	};
-	int err;
-
-	if (!data->running || data->slow_timer_ticks == 0U) {
-		return;
-	}
-
-	if (!atomic_cas(&data->slow_timer_running, 0, 1)) {
-		return;
-	}
-
-	err = counter_set_channel_alarm(cfg->slow_timer, 0U, &alarm);
-	if (err != 0) {
-		atomic_clear(&data->slow_timer_running);
 	}
 }
 
@@ -607,8 +580,6 @@ static int motor_actuator_stm32_disable(const struct device *dev)
 	struct motor_actuator_stm32_data *data = dev->data;
 
 	data->running = false;
-	(void)counter_cancel_channel_alarm(cfg->slow_timer, 0U);
-	atomic_clear(&data->slow_timer_running);
 	motor_actuator_stm32_disable_outputs(dev);
 	tim_enable_main_output(cfg->tim, false);
 	LL_TIM_DisableCounter(cfg->tim);
@@ -665,7 +636,6 @@ static int motor_actuator_stm32_hw_init(const struct device *dev)
 	data->drive_mode = MOTOR_DRIVE_NORMAL;
 	data->running = false;
 	data->clamped_leg = MOTOR_ACTUATOR_LEG_NONE;
-	atomic_clear(&data->slow_timer_running);
 
 	err = motor_actuator_stm32_enable_tim_clock(cfg, &tim_clk_hz);
 	if (err != 0) {
@@ -713,14 +683,29 @@ static int motor_actuator_stm32_hw_init(const struct device *dev)
 	slow_ticks = ((uint64_t)counter_get_frequency(cfg->slow_timer) *
 		      (uint64_t)cfg->stage_cfg.pwm_period_ns * (uint64_t)cfg->slow_sample_div) /
 		     (uint64_t)NSEC_PER_SEC;
-	slow_top = counter_get_top_value(cfg->slow_timer);
-	if ((slow_ticks == 0ULL) || (slow_ticks > (uint64_t)slow_top)) {
+	slow_top = counter_get_max_top_value(cfg->slow_timer);
+	if ((slow_ticks < 2ULL) || ((slow_ticks - 1ULL) > (uint64_t)slow_top)) {
 		LOG_ERR("outer loop period needs %llu ticks of %s, which counts up to %u; "
 			"raise its st,prescaler",
 			slow_ticks, cfg->slow_timer->name, slow_top);
 		return -EINVAL;
 	}
-	data->slow_timer_ticks = (uint32_t)slow_ticks;
+
+	/* The counter wraps after top + 1 ticks. It runs off the same clock
+	 * tree as the PWM timer, so the outer tick keeps a fixed phase to it.
+	 */
+	err = counter_set_top_value(cfg->slow_timer,
+				    &(struct counter_top_cfg){
+					    .ticks = (uint32_t)(slow_ticks - 1ULL),
+					    .callback = motor_actuator_stm32_slow_tick_cb,
+					    .user_data = (void *)dev,
+					    .flags = 0U,
+				    });
+	if (err != 0) {
+		LOG_ERR("could not set the outer loop period on %s (%d)", cfg->slow_timer->name,
+			err);
+		return err;
+	}
 
 	err = counter_start(cfg->slow_timer);
 	if ((err != 0) && (err != -EALREADY)) {
@@ -822,7 +807,6 @@ const struct motor_actuator_ops motor_actuator_stm32_api = {
 			if (data->actuator_cb != NULL) {                                             \
 				data->actuator_cb(dev, data->actuator_user_data);                    \
 			}                                                                            \
-			motor_actuator_stm32_arm_slow_timer(dev);                                    \
 		}                                                                                    \
 		return 0;                                                                            \
 	}                                                                                            \
