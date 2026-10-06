@@ -19,6 +19,12 @@ struct motor_test_fake {
 
 	float sensor_samples[MOTOR_SENSOR_CURRENT_MAX];
 	size_t sensor_sample_count;
+	/* Stands in for what a driver resolves from the clamped leg. Left
+	 * invalid, the fake reports the channel as unreadable, which is how a
+	 * board without a per-leg sense map behaves.
+	 */
+	float bridge_current_a;
+	bool bridge_current_valid;
 	float angle_rad;
 	bool angle_valid;
 
@@ -37,6 +43,10 @@ struct motor_test_fake {
 	float last_duty[MOTOR_ACTUATOR_DUTY_MAX];
 	uint8_t last_n_duty;
 	bool has_last_duty;
+	/* Derived from last_duty the same way the STM32 stage derives it, so
+	 * tests see the convention current sensing depends on.
+	 */
+	uint8_t clamped_leg;
 };
 
 extern const struct motor_sensor_ops motor_test_fake_sensor_ops;

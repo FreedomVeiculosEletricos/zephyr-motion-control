@@ -17,6 +17,9 @@ static int fake_sensor_start_sample(const struct device *dev, enum motor_sensor_
 	if (ch == MOTOR_SENSOR_CHAN_ANGLE) {
 		return fake->angle_valid ? 0 : -ENODATA;
 	}
+	if (ch == MOTOR_SENSOR_CHAN_CURRENT_BRIDGE) {
+		return 0;
+	}
 	if (ch != MOTOR_SENSOR_CHAN_CURRENT) {
 		return -EINVAL;
 	}
@@ -33,6 +36,18 @@ static int fake_sensor_get_sample(const struct device *dev, enum motor_sensor_ch
 			return -ENODATA;
 		}
 		out[0] = fake->angle_rad;
+		*got = 1U;
+		return 0;
+	}
+
+	if (ch == MOTOR_SENSOR_CHAN_CURRENT_BRIDGE) {
+		if (out_len < 1U) {
+			return -EINVAL;
+		}
+		if (!fake->bridge_current_valid) {
+			return -EAGAIN;
+		}
+		out[0] = fake->bridge_current_a;
 		*got = 1U;
 		return 0;
 	}
@@ -59,7 +74,8 @@ static bool fake_sensor_channel_supported(const struct device *dev, enum motor_s
 {
 	ARG_UNUSED(dev);
 
-	return (ch == MOTOR_SENSOR_CHAN_CURRENT) || (ch == MOTOR_SENSOR_CHAN_ANGLE);
+	return (ch == MOTOR_SENSOR_CHAN_CURRENT) || (ch == MOTOR_SENSOR_CHAN_CURRENT_BRIDGE) ||
+	       (ch == MOTOR_SENSOR_CHAN_ANGLE);
 }
 
 static int fake_sensor_set_measurement_done_callback(const struct device *dev,
@@ -107,6 +123,7 @@ int motor_test_fake_actuator_init(const struct device *dev)
 	struct motor_test_fake *fake = dev->data;
 
 	memcpy(&fake->actuator_stage, &motor_test_fake_stage_default, sizeof(fake->actuator_stage));
+	fake->clamped_leg = MOTOR_ACTUATOR_LEG_NONE;
 	return 0;
 }
 
@@ -133,6 +150,22 @@ static int fake_actuator_set_duty(const struct device *dev, const float *duty, u
 	memcpy(fake->last_duty, duty, (size_t)n * sizeof(float));
 	fake->last_n_duty = n;
 	fake->has_last_duty = true;
+
+	fake->clamped_leg = MOTOR_ACTUATOR_LEG_NONE;
+	for (uint8_t i = 0U; i < n; i++) {
+		if (duty[i] != 0.0f) {
+			continue;
+		}
+		if (fake->clamped_leg != MOTOR_ACTUATOR_LEG_NONE) {
+			/* Two legs standing still is an idle bridge, not a
+			 * measurable one.
+			 */
+			fake->clamped_leg = MOTOR_ACTUATOR_LEG_NONE;
+			break;
+		}
+		fake->clamped_leg = i;
+	}
+
 	return 0;
 }
 
@@ -202,6 +235,13 @@ static const struct motor_stage_config *fake_actuator_get_config(const struct de
 	return &fake->actuator_stage;
 }
 
+static uint8_t fake_actuator_get_clamped_leg(const struct device *dev)
+{
+	struct motor_test_fake *fake = dev->data;
+
+	return fake->clamped_leg;
+}
+
 static int fake_actuator_sto_arm(const struct device *dev)
 {
 	ARG_UNUSED(dev);
@@ -247,6 +287,7 @@ const struct motor_actuator_ops motor_test_fake_actuator_ops = {
 	.get_fault = fake_actuator_get_fault,
 	.self_test = fake_actuator_self_test,
 	.get_config = fake_actuator_get_config,
+	.get_clamped_leg = fake_actuator_get_clamped_leg,
 	.sto_arm = fake_actuator_sto_arm,
 	.sto_release = fake_actuator_sto_release,
 };

@@ -115,6 +115,10 @@ struct motor_sensor_stm32_config {
 	const struct stm32_pclken *pclken;
 	size_t pclk_len;
 	uint32_t adc_common_clock;
+	/* Which bridge leg each injected rank measures, or NULL when the board
+	 * did not say. Indexes run parallel to adc_ch_decimal.
+	 */
+	const uint8_t *sense_leg;
 	float amps_per_volt;
 	uint32_t vref_mv;
 	uint8_t resolution_bits;
@@ -302,6 +306,12 @@ struct motor_sensor_stm32_data {
 	 * this as the single per-channel scale factor.
 	 */
 	float amps_per_count;
+	/* Current through the leg that the applied command clamped, signed by
+	 * the direction that command implies. Resolved on every latch, since
+	 * the leg carrying the load current moves with the command.
+	 */
+	float bridge_current_a;
+	bool bridge_current_valid;
 	float angle_rad;
 	motor_sensor_measurement_done_cb_t measurement_done_cb;
 	void *measurement_done_user_data;
@@ -511,6 +521,50 @@ static int adc_inj_sw_read(ADC_TypeDef *adc, uint8_t n, uint16_t *raw_out)
 	return err;
 }
 
+/* Collapse the per-rank readings into the one signed number the control loop
+ * wants.
+ *
+ * Low-side sensing (a shunt, or the Rds(on) of the low-side FET) only reports a
+ * magnitude, and only the leg held at zero duty keeps its low side on for the
+ * whole period, so only that leg carries the load current where the sampling
+ * instant cannot miss it. Which leg that is flips with the
+ * direction of travel, so the reading has to follow the command rather than a
+ * fixed channel.
+ */
+static void bridge_current_update(const struct motor_sensor_stm32_config *cfg,
+				  struct motor_sensor_stm32_data *data)
+{
+	uint8_t leg;
+	uint8_t i;
+
+	if (cfg->sense_leg == NULL) {
+		return;
+	}
+
+	leg = motor_actuator_get_clamped_leg(cfg->sync_actuator);
+	if (leg == MOTOR_ACTUATOR_LEG_NONE) {
+		data->bridge_current_valid = false;
+		return;
+	}
+
+	for (i = 0U; i < data->n_adc_channels; i++) {
+		if (cfg->sense_leg[i] != leg) {
+			continue;
+		}
+
+		/* Leg 0 clamped means the command drove the bridge the other
+		 * way, matching the duty ordering sign-magnitude algorithms
+		 * emit.
+		 */
+		data->bridge_current_a =
+			(leg == 0U) ? -data->current_amps[i] : data->current_amps[i];
+		data->bridge_current_valid = true;
+		return;
+	}
+
+	data->bridge_current_valid = false;
+}
+
 static void adc_latch_isr(const struct device *dev)
 {
 	const struct motor_sensor_stm32_config *cfg = dev->config;
@@ -534,6 +588,8 @@ static void adc_latch_isr(const struct device *dev)
 					data->current_offset[i];
 	}
 
+	bridge_current_update(cfg, data);
+
 	if (data->measurement_done_cb != NULL) {
 		data->measurement_done_cb(dev, data->measurement_done_user_data);
 	}
@@ -548,6 +604,9 @@ static int motor_sensor_stm32_start_sample(const struct device *dev, enum motor_
 	case MOTOR_SENSOR_CHAN_CURRENT:
 		LL_ADC_INJ_StartConversion(cfg->adc);
 		return 0;
+	case MOTOR_SENSOR_CHAN_CURRENT_BRIDGE:
+		/* Rides on the composite conversion; nothing separate to start. */
+		return (cfg->sense_leg != NULL) ? 0 : -ENOTSUP;
 	case MOTOR_SENSOR_CHAN_ANGLE:
 #if !IS_ENABLED(CONFIG_SENSOR)
 		return -ENOTSUP;
@@ -599,6 +658,19 @@ static int motor_sensor_stm32_get_sample(const struct device *dev, enum motor_se
 			out[i] = data->current_amps[i];
 		}
 		*got = data->n_adc_channels;
+		return 0;
+	case MOTOR_SENSOR_CHAN_CURRENT_BRIDGE:
+		if (cfg->sense_leg == NULL) {
+			return -ENOTSUP;
+		}
+		if (out_len < 1U) {
+			return -EINVAL;
+		}
+		if (!data->bridge_current_valid) {
+			return -EAGAIN;
+		}
+		out[0] = data->bridge_current_a;
+		*got = 1U;
 		return 0;
 	case MOTOR_SENSOR_CHAN_ANGLE:
 #if !IS_ENABLED(CONFIG_SENSOR)
@@ -667,6 +739,8 @@ static bool motor_sensor_stm32_channel_supported(const struct device *dev,
 	switch (ch) {
 	case MOTOR_SENSOR_CHAN_CURRENT:
 		return data->n_adc_channels > 0U;
+	case MOTOR_SENSOR_CHAN_CURRENT_BRIDGE:
+		return cfg->sense_leg != NULL;
 	case MOTOR_SENSOR_CHAN_ANGLE:
 #if !IS_ENABLED(CONFIG_SENSOR)
 		return false;
@@ -714,6 +788,15 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 		    (CONCAT(SENSOR_STM32_ADC_CLOCK_PREFIX(inst),                                   \
 			    DT_PROP(DT_INST_PHANDLE(inst, adc), st_adc_prescaler))),                \
 		    (LL_ADC_CLOCK_ASYNC_DIV1))
+#define SENSOR_STM32_SENSE_LEGS_DEFINE(inst)                                                       \
+	IF_ENABLED(DT_INST_NODE_HAS_PROP(inst, current_sense_legs),                                \
+		   (static const uint8_t motor_sensor_stm32_sense_leg_##inst[] =                   \
+			    DT_INST_PROP(inst, current_sense_legs);))
+
+#define SENSOR_STM32_SENSE_LEGS(inst)                                                              \
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, current_sense_legs),                               \
+		    (motor_sensor_stm32_sense_leg_##inst), (NULL))
+
 #define SENSOR_STM32_ADC_IRQN(inst) DT_IRQ_BY_IDX(DT_INST_PHANDLE(inst, adc), 0, irq)
 #define SENSOR_STM32_ADC_IRQ_PRIO(inst)                                                         \
 	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, zephyr_adc_irq_priority),                      \
@@ -725,7 +808,13 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 #define SENSOR_STM32_DEFINE(inst)                                                                  \
 	BUILD_ASSERT(DT_INST_PROP_LEN(inst, adc_channels) >= 1);                                     \
 	BUILD_ASSERT(DT_INST_PROP_LEN(inst, adc_channels) <= MOTOR_SENSOR_CURRENT_MAX);              \
+	BUILD_ASSERT(COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, current_sense_legs),                    \
+				 (DT_INST_PROP_LEN(inst, current_sense_legs) ==                      \
+				  DT_INST_PROP_LEN(inst, adc_channels)),                             \
+				 (1)),                                                               \
+		     "current-sense-legs needs one entry per adc-channels entry");                  \
 	static const uint32_t motor_sensor_stm32_adc_ch_##inst[] = DT_INST_PROP(inst, adc_channels); \
+	SENSOR_STM32_SENSE_LEGS_DEFINE(inst)                                                         \
 	static const struct stm32_pclken motor_sensor_stm32_pclken_##inst[] =                      \
 		STM32_DT_CLOCKS(DT_INST_PHANDLE(inst, adc));                                       \
 	static const struct motor_sensor_stm32_config motor_sensor_stm32_cfg_##inst = {            \
@@ -734,6 +823,7 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 		.pclken = motor_sensor_stm32_pclken_##inst,                                        \
 		.pclk_len = ARRAY_SIZE(motor_sensor_stm32_pclken_##inst),                          \
 		.adc_common_clock = SENSOR_STM32_ADC_COMMON_CLOCK(inst),                           \
+		.sense_leg = SENSOR_STM32_SENSE_LEGS(inst),                                        \
 		.feedback_sensor =                                                                   \
 			COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, feedback_sensor),                    \
 				    (DEVICE_DT_GET(DT_INST_PHANDLE(inst, feedback_sensor))),         \
@@ -788,9 +878,24 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 		if (err != 0) {                                                                    \
 			return err;                                                                \
 		}                                                                                  \
+		if (cfg->sense_leg != NULL) {                                                      \
+			const struct motor_stage_config *stage_ =                                  \
+				motor_actuator_get_config(cfg->sync_actuator);                     \
+			for (i = 0U; i < data->n_adc_channels; i++) {                              \
+				if (cfg->sense_leg[i] < stage_->n_phases) {                        \
+					continue;                                                  \
+				}                                                                  \
+				LOG_ERR("current-sense-legs[%u] names leg %u, but the stage "       \
+					"drives %u",                                               \
+					i, cfg->sense_leg[i], stage_->n_phases);                   \
+				return -EINVAL;                                                    \
+			}                                                                          \
+		}                                                                                  \
 		data->measurement_done_cb = NULL;                                                  \
 		data->measurement_done_user_data = NULL;                                           \
 		data->angle_rad = 0.0f;                                                            \
+		data->bridge_current_a = 0.0f;                                                     \
+		data->bridge_current_valid = false;                                                \
 		err = adc_inj_configure(cfg, data->adc_ch_decimal, data->n_adc_channels,            \
 					cfg->resolution_bits);                                      \
 		if (err != 0) {                                                                    \

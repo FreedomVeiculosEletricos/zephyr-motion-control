@@ -106,7 +106,7 @@ void motor_velocity_observer_block_entry(struct motor_block *self, const struct 
 					 struct motor_block_out *out)
 {
 	struct motor_algo_velocity_observer_data *st = observer_data_from_block(self);
-	float i_meas = 0.0f;
+	float i_meas = motor_sense_current_a(in->sense);
 	float u = 0.0f;
 	float i_err;
 	float omega_raw;
@@ -116,10 +116,6 @@ void motor_velocity_observer_block_entry(struct motor_block *self, const struct 
 	out->n_duty = 0U;
 	out->has_current_ref = false;
 	out->has_applied_u = false;
-
-	if ((in->sense != NULL) && (in->sense->current_count > 0U)) {
-		i_meas = in->sense->current_amps[0];
-	}
 
 	if (in->has_applied_u) {
 		u = in->applied_u;

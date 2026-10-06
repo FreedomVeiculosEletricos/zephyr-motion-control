@@ -77,6 +77,11 @@ struct motor_actuator_stm32_data {
 	/* Cached at init: ARR + 1 = full-scale duty for oc_set_compare(). */
 	uint32_t max_duty;
 	uint32_t fault_flags;
+	/* Leg left at zero duty by the last set_duty, or MOTOR_ACTUATOR_LEG_NONE.
+	 * Written only from the PWM ISR and read as a single byte, so current
+	 * sensing can pick the conducting leg without a lock.
+	 */
+	uint8_t clamped_leg;
 	enum motor_drive_mode drive_mode;
 	bool running;
 };
@@ -342,6 +347,8 @@ static int motor_actuator_stm32_set_duty(const struct device *dev, const float *
 	uint32_t max_duty = data->max_duty;
 	uint8_t i;
 	uint8_t limit;
+	uint8_t clamped = MOTOR_ACTUATOR_LEG_NONE;
+	uint8_t n_clamped = 0U;
 
 	if (data->fault_flags != 0U) {
 		return -EIO;
@@ -351,6 +358,7 @@ static int motor_actuator_stm32_set_duty(const struct device *dev, const float *
 		for (i = 0U; i < cfg->n_half_bridges; i++) {
 			oc_set_compare(cfg->tim, cfg->pwm_ch[i], 0U);
 		}
+		data->clamped_leg = MOTOR_ACTUATOR_LEG_NONE;
 		return 0;
 	}
 
@@ -366,7 +374,19 @@ static int motor_actuator_stm32_set_duty(const struct device *dev, const float *
 		}
 		cmp = (uint32_t)(d * (float)max_duty);
 		oc_set_compare(cfg->tim, cfg->pwm_ch[i], cmp);
+
+		if (cmp == 0U) {
+			clamped = i;
+			n_clamped++;
+		}
 	}
+
+	/* Exactly one leg standing still is what makes its low side carry the
+	 * load current for the whole period. Two of them means the bridge is idle and
+	 * none means both are modulating, and in neither case does a single leg
+	 * speak for the bridge.
+	 */
+	data->clamped_leg = (n_clamped == 1U) ? clamped : MOTOR_ACTUATOR_LEG_NONE;
 
 	return 0;
 }
@@ -479,6 +499,13 @@ static const struct motor_stage_config *motor_actuator_stm32_get_config(const st
 	return &cfg->stage_cfg;
 }
 
+static uint8_t motor_actuator_stm32_get_clamped_leg(const struct device *dev)
+{
+	struct motor_actuator_stm32_data *data = dev->data;
+
+	return data->clamped_leg;
+}
+
 static void motor_actuator_stm32_disable_outputs(const struct device *dev)
 {
 	const struct motor_actuator_stm32_config *cfg = dev->config;
@@ -552,6 +579,7 @@ static int motor_actuator_stm32_hw_init(const struct device *dev)
 	data->self = dev;
 	data->drive_mode = MOTOR_DRIVE_NORMAL;
 	data->running = false;
+	data->clamped_leg = MOTOR_ACTUATOR_LEG_NONE;
 	atomic_clear(&data->slow_timer_running);
 
 	err = motor_actuator_stm32_enable_tim_clock(cfg, &tim_clk_hz);
@@ -655,6 +683,7 @@ const struct motor_actuator_ops motor_actuator_stm32_api = {
 	.get_fault = motor_actuator_stm32_get_fault,
 	.self_test = motor_actuator_self_test_noop,
 	.get_config = motor_actuator_stm32_get_config,
+	.get_clamped_leg = motor_actuator_stm32_get_clamped_leg,
 	.sto_arm = motor_actuator_sto_arm_unsupported,
 	.sto_release = motor_actuator_sto_release_unsupported,
 };

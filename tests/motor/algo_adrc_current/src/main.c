@@ -15,12 +15,19 @@
 #include "motor_test_fake.h"
 
 static struct motor_test_fake adrc_current_fake;
+static struct motor_test_fake adrc_sm_fake;
 
 DEVICE_DT_DEFINE(DT_NODELABEL(adrc_current_sensor), motor_test_fake_sensor_init, NULL,
 		 &adrc_current_fake, NULL, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		 &motor_test_fake_sensor_ops);
 DEVICE_DT_DEFINE(DT_NODELABEL(adrc_current_actuator), motor_test_fake_actuator_init, NULL,
 		 &adrc_current_fake, NULL, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		 &motor_test_fake_actuator_ops);
+DEVICE_DT_DEFINE(DT_NODELABEL(adrc_sm_sensor), motor_test_fake_sensor_init, NULL, &adrc_sm_fake,
+		 NULL, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		 &motor_test_fake_sensor_ops);
+DEVICE_DT_DEFINE(DT_NODELABEL(adrc_sm_actuator), motor_test_fake_actuator_init, NULL,
+		 &adrc_sm_fake, NULL, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		 &motor_test_fake_actuator_ops);
 
 static void *suite_setup(void)
@@ -133,6 +140,123 @@ ZTEST(motor_algo_adrc_current_suite, test_step_response_converges)
 	zassert_equal(motor_algo_adrc_current_get_state(motor, &state), 0, NULL);
 	zassert_within(state.i_meas_a, plant, 0.1f, NULL);
 	zassert_within(state.i_ref_a, ref, 1e-6f, NULL);
+
+	motor_estop(motor);
+}
+
+/* Low-side bridge sensing reports a magnitude, and only the leg the command
+ * clamped carries the load current where the sampling instant cannot miss it.
+ * A driver that can pair a reading with a leg resolves that into one signed reading, and
+ * the algorithm has to prefer it over the raw vector — whose first entry is the
+ * idle leg for one of the two directions of travel.
+ */
+ZTEST(motor_algo_adrc_current_suite, test_bridge_reading_wins_over_the_raw_vector)
+{
+	motor_t motor = motor_subsys_get_by_label("adrc_current_motor");
+	struct motor_adrc_current_params params = {
+		.kp = 1.0f,
+		.b0 = 1.0f,
+		.beta1 = 0.0f,
+		.beta2 = 0.0f,
+		.out_min = -1.0f,
+		.out_max = 1.0f,
+	};
+	struct motor_adrc_current_state state;
+
+	zassert_not_null(motor, NULL);
+
+	/* What the idle leg happens to read, which is what the algorithm used
+	 * to consume unconditionally.
+	 */
+	adrc_current_fake.sensor_samples[0] = 5.0f;
+	adrc_current_fake.sensor_sample_count = 2U;
+	adrc_current_fake.bridge_current_a = -1.25f;
+	adrc_current_fake.bridge_current_valid = true;
+
+	zassert_equal(motor_enable(motor), 0, NULL);
+	zassert_equal(motor_algo_adrc_current_set_params(motor, &params, true), 0, NULL);
+	zassert_equal(motor_algo_adrc_current_set_current(motor, 0.2f), 0, NULL);
+
+	motor_test_fake_sync_fire(DEVICE_DT_GET(DT_NODELABEL(adrc_current_actuator)));
+
+	zassert_equal(motor_algo_adrc_current_get_state(motor, &state), 0, NULL);
+	zassert_within(state.i_meas_a, -1.25f, 1e-6f, NULL);
+
+	adrc_current_fake.bridge_current_valid = false;
+	motor_estop(motor);
+}
+
+/* Sensors that cannot pair a reading with a leg report the channel as unreadable,
+ * and everything has to keep working off the composite vector.
+ */
+ZTEST(motor_algo_adrc_current_suite, test_falls_back_to_the_raw_vector)
+{
+	motor_t motor = motor_subsys_get_by_label("adrc_current_motor");
+	struct motor_adrc_current_params params = {
+		.kp = 1.0f,
+		.b0 = 1.0f,
+		.beta1 = 0.0f,
+		.beta2 = 0.0f,
+		.out_min = -1.0f,
+		.out_max = 1.0f,
+	};
+	struct motor_adrc_current_state state;
+
+	zassert_not_null(motor, NULL);
+
+	adrc_current_fake.sensor_samples[0] = 0.3f;
+	adrc_current_fake.sensor_sample_count = 1U;
+	adrc_current_fake.bridge_current_valid = false;
+
+	zassert_equal(motor_enable(motor), 0, NULL);
+	zassert_equal(motor_algo_adrc_current_set_params(motor, &params, true), 0, NULL);
+	zassert_equal(motor_algo_adrc_current_set_current(motor, 0.2f), 0, NULL);
+
+	motor_test_fake_sync_fire(DEVICE_DT_GET(DT_NODELABEL(adrc_current_actuator)));
+
+	zassert_equal(motor_algo_adrc_current_get_state(motor, &state), 0, NULL);
+	zassert_within(state.i_meas_a, 0.3f, 1e-6f, NULL);
+
+	motor_estop(motor);
+}
+
+/* The sign the sensor puts on the bridge reading comes from which leg is
+ * clamped, so the mapping from direction to clamped leg is the contract current
+ * sensing is built on: leg 1 idle for a positive command, leg 0 idle for a
+ * negative one.
+ */
+ZTEST(motor_algo_adrc_current_suite, test_clamped_leg_follows_the_commanded_direction)
+{
+	motor_t motor = motor_subsys_get_by_label("adrc_sm_motor");
+	struct motor_adrc_current_params params = {
+		.kp = 1.0f,
+		.b0 = 1.0f,
+		.beta1 = 0.0f,
+		.beta2 = 0.0f,
+		.out_min = -1.0f,
+		.out_max = 1.0f,
+	};
+
+	zassert_not_null(motor, NULL);
+
+	adrc_sm_fake.sensor_samples[0] = 0.0f;
+	adrc_sm_fake.sensor_sample_count = 1U;
+	adrc_sm_fake.bridge_current_valid = false;
+
+	zassert_equal(motor_enable(motor), 0, NULL);
+	zassert_equal(motor_algo_adrc_current_set_params(motor, &params, true), 0, NULL);
+
+	zassert_equal(motor_algo_adrc_current_set_current(motor, 0.4f), 0, NULL);
+	motor_test_fake_sync_fire(DEVICE_DT_GET(DT_NODELABEL(adrc_sm_actuator)));
+	zassert_within(adrc_sm_fake.last_duty[0], 0.4f, 1e-6f, NULL);
+	zassert_within(adrc_sm_fake.last_duty[1], 0.0f, 1e-6f, NULL);
+	zassert_equal(adrc_sm_fake.clamped_leg, 1U, NULL);
+
+	zassert_equal(motor_algo_adrc_current_set_current(motor, -0.4f), 0, NULL);
+	motor_test_fake_sync_fire(DEVICE_DT_GET(DT_NODELABEL(adrc_sm_actuator)));
+	zassert_within(adrc_sm_fake.last_duty[0], 0.0f, 1e-6f, NULL);
+	zassert_within(adrc_sm_fake.last_duty[1], 0.4f, 1e-6f, NULL);
+	zassert_equal(adrc_sm_fake.clamped_leg, 0U, NULL);
 
 	motor_estop(motor);
 }

@@ -55,6 +55,14 @@ enum motor_stage_topology {
 };
 
 /**
+ * @brief No leg is clamped: every leg is modulating (bipolar drive).
+ *
+ * Returned by @ref motor_actuator_get_clamped_leg when the applied command
+ * leaves no leg at a standstill, and by backends that do not track it.
+ */
+#define MOTOR_ACTUATOR_LEG_NONE 0xFFU
+
+/**
  * @brief Static configuration for the power stage backend.
  *
  * Populated from devicetree at compile time.
@@ -228,6 +236,23 @@ struct motor_actuator_ops {
 	const struct motor_stage_config *(*get_config)(const struct device *dev);
 
 	/**
+	 * @brief Report which leg the last applied command clamped.
+	 *
+	 * A leg driven at zero duty keeps its low side on, so it carries the
+	 * load current for the whole period and its low-side sense can be sampled
+	 * regardless of where in the cycle the conversion lands. Which leg that
+	 * is flips with the direction of travel, so current sensing has to ask
+	 * rather than assume.
+	 *
+	 * Must be safe to call from the PWM ISR.
+	 *
+	 * @param dev  Power stage device.
+	 * @return Index into the leg ordering of @ref motor_actuator_set_duty,
+	 *         or @ref MOTOR_ACTUATOR_LEG_NONE when no leg is clamped.
+	 */
+	uint8_t (*get_clamped_leg)(const struct device *dev);
+
+	/**
 	 * @brief Arm the Safe Torque Off (STO) path.
 	 *
 	 * Enables monitoring of the dual-channel STO inputs. When both
@@ -357,6 +382,23 @@ static inline const struct motor_stage_config *motor_actuator_get_config(const s
 	const struct motor_actuator_ops *ops = dev->api;
 
 	return ops->get_config(dev);
+}
+
+/**
+ * @brief Which leg the last applied command clamped, if any.
+ *
+ * Optional: backends that do not implement it report
+ * @ref MOTOR_ACTUATOR_LEG_NONE rather than failing.
+ */
+static inline uint8_t motor_actuator_get_clamped_leg(const struct device *dev)
+{
+	const struct motor_actuator_ops *ops = dev->api;
+
+	if (ops->get_clamped_leg == NULL) {
+		return MOTOR_ACTUATOR_LEG_NONE;
+	}
+
+	return ops->get_clamped_leg(dev);
 }
 
 /**

@@ -31,4 +31,43 @@
 		status = "okay";
 		pwm-frequency = <20000>;
 	};
+
+	/* Second motor in sign-magnitude, where one leg is held at zero duty and
+	 * the other modulates. That is the mode current sensing reads a clamped
+	 * leg in, and the mapping from direction to clamped leg is the contract
+	 * it signs its reading by.
+	 */
+	adrc_sm_motor: motor-controller-sm {
+		compatible = "zephyr,motor-controller";
+		status = "okay";
+
+		sensor = <&adrc_sm_sensor>;
+		actuator = <&adrc_sm_actuator>;
+		algorithm = <&adrc_sm_algo>;
+	};
+
+	adrc_sm_algo: motor-algorithm-adrc-current-sm {
+		compatible = "zephyr,motor-algorithm-adrc-current";
+		status = "okay";
+
+		adrc-current-kp-milli = <1000>;
+		adrc-current-b0-milli = <1000>;
+		adrc-current-beta1-milli = <0>;
+		adrc-current-beta2-milli = <0>;
+		adrc-current-out-min-milli = <(-1000)>;
+		adrc-current-out-max-milli = <1000>;
+		i-max-ma = <5000>;
+		sign-magnitude;
+	};
+
+	adrc_sm_sensor: motor-test-sensor-sm {
+		compatible = "zephyr,motor-test-sensor";
+		status = "okay";
+	};
+
+	adrc_sm_actuator: motor-test-actuator-sm {
+		compatible = "zephyr,motor-test-actuator";
+		status = "okay";
+		pwm-frequency = <20000>;
+	};
 };

@@ -22,6 +22,30 @@ properties:
     required: true
     description: Power-stage device paired with this sensor (timing / coordination).
 
+  current-sense-legs:
+    type: array
+    required: false
+    description: |
+      Which half-bridge leg each entry of adc-channels measures, given as an
+      index into the paired actuator's pwm-channels. One cell per adc-channels
+      entry, same order.
+
+      Per-leg sensing sits on the low side of the bridge, either a shunt or the
+      Rds(on) of the low-side FET. It only reports a magnitude, and only reads
+      the load current while that low side conducts, which holds for the whole
+      PWM period only on the leg held at zero duty. Which leg that is flips with
+      the direction of travel, so without this map the driver cannot tell a
+      reading of the conducting leg from a reading of the idle one, and one
+      direction of travel measures the wrong leg. Given the map, the
+      driver resolves MOTOR_SENSOR_CHAN_CURRENT_BRIDGE on every conversion.
+
+      Sign convention for a two-leg bridge: leg 0 clamped means the current is
+      negative, leg 1 clamped means positive, matching the duty ordering that
+      sign-magnitude algorithms emit.
+
+      Omit on boards that do not sense per leg; MOTOR_SENSOR_CHAN_CURRENT_BRIDGE
+      is then unsupported and consumers fall back to the composite vector.
+
   feedback-sensor:
     type: phandle
     required: false

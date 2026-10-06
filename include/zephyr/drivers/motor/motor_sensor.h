@@ -40,8 +40,19 @@ enum motor_sensor_channel {
 	MOTOR_SENSOR_CHAN_CURRENT = 0,
 	/** Electrical angle [rad] from optional `feedback-sensor` (Zephyr Sensor API). */
 	MOTOR_SENSOR_CHAN_ANGLE = 1,
-	/** Reserved for future composite (e.g. FOC d/q). */
-	MOTOR_SENSOR_CHAN__RESERVED_2 = 2,
+	/**
+	 * Single signed bridge current [A], resolved by the driver from the
+	 * composite vector.
+	 *
+	 * Low-side sensing on an H-bridge (a shunt, or the Rds(on) of the
+	 * low-side FET) only ever sees a magnitude, so which leg carries the
+	 * load current and what sign that implies both depend on the command
+	 * being applied. Drivers that can pair each reading with the leg it
+	 * belongs to collapse that into one signed number here, so algorithms do not
+	 * have to know the bridge topology. Unsupported by drivers that cannot
+	 * make the association.
+	 */
+	MOTOR_SENSOR_CHAN_CURRENT_BRIDGE = 2,
 	MOTOR_SENSOR_CHAN__RESERVED_3 = 3,
 };
 

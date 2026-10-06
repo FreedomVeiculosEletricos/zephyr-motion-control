@@ -128,6 +128,11 @@ static void motor_ctrl_hot_pwm_isr(const struct device *actuator, void *user_dat
 	}
 
 	sense.current_count = got;
+	if (motor_sensor_channel_supported(ctrl->sensor, MOTOR_SENSOR_CHAN_CURRENT_BRIDGE)) {
+		err = motor_sensor_get_sample(ctrl->sensor, MOTOR_SENSOR_CHAN_CURRENT_BRIDGE,
+					      &sense.bridge_current_a, 1U, &got);
+		sense.bridge_current_valid = (err == 0) && (got == 1U);
+	}
 	if (motor_sensor_channel_supported(ctrl->sensor, MOTOR_SENSOR_CHAN_ANGLE)) {
 		err = motor_sensor_get_sample(ctrl->sensor, MOTOR_SENSOR_CHAN_ANGLE, &sense.angle_rad,
 					      1U, &got);

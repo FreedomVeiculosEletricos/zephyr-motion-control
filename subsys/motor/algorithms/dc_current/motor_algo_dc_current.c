@@ -22,15 +22,11 @@ void motor_dc_current_block_entry(struct motor_block *self, const struct motor_b
 				  struct motor_block_out *out)
 {
 	struct motor_algo_dc_current_data *st = dc_data_from_block(self);
-	float ia_meas = 0.0f;
+	float ia_meas = motor_sense_current_a(in->sense);
 	float err;
 	float u;
 	float d;
 	float i_ref = in->has_current_ref ? in->current_ref_a : st->state.i_ref_a;
-
-	if ((in->sense != NULL) && (in->sense->current_count > 0U)) {
-		ia_meas = in->sense->current_amps[0];
-	}
 
 	if (i_ref > st->limits.i_max_a) {
 		i_ref = st->limits.i_max_a;

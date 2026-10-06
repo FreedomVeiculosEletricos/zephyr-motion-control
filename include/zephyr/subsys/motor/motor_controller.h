@@ -33,9 +33,38 @@ struct motor_block;
 struct motor_sense_bundle {
 	float current_amps[MOTOR_SENSOR_CURRENT_MAX];
 	size_t current_count;
+	/* Signed bridge current from @ref MOTOR_SENSOR_CHAN_CURRENT_BRIDGE: the
+	 * reading of the clamped leg, with the sign the applied direction
+	 * implies. Only the sensor knows which entry of current_amps that is,
+	 * since it moves with the command.
+	 */
+	float bridge_current_a;
+	bool bridge_current_valid;
 	float angle_rad;
 	bool angle_valid;
 };
+
+/**
+ * @brief Measured current through the bridge, in amps.
+ *
+ * Prefers the signed reading the sensor resolved from the leg the command
+ * clamped, since that is the one whose low side carries the load current for the
+ * whole PWM period and the one that knows which way it flows. Falls back to the
+ * first composite entry for sensors that cannot pair a reading with a leg, and to
+ * zero when there is no reading at all.
+ */
+static inline float motor_sense_current_a(const struct motor_sense_bundle *sense)
+{
+	if (sense == NULL) {
+		return 0.0f;
+	}
+
+	if (sense->bridge_current_valid) {
+		return sense->bridge_current_a;
+	}
+
+	return (sense->current_count > 0U) ? sense->current_amps[0] : 0.0f;
+}
 
 struct motor_block_in {
 	const struct motor_sense_bundle *sense;
