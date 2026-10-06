@@ -143,12 +143,15 @@ static int cmd_motor(const struct shell *sh, size_t argc, char **argv)
 	struct motor_adrc_current_limits adrc_lim;
 	struct motor_dc_current_pi pi;
 	struct motor_dc_current_limits lim;
+	struct motor_velocity_pi_params vel_params;
+	struct motor_velocity_pi_limits vel_lim;
 	bool reset_i;
 
 	if (argc < 2) {
 		shell_error(
 			sh,
-			"sub: list|use|enable|disable|estop|current|velocity|selftest|status|pi|imax|adrc");
+			"sub: list|use|enable|disable|estop|current|velocity|selftest|status|pi|imax|adrc|"
+			"vpi|vimax");
 		return -EINVAL;
 	}
 
@@ -292,10 +295,36 @@ static int cmd_motor(const struct shell *sh, size_t argc, char **argv)
 		return motor_algo_adrc_current_set_params(m, &adrc_params, reset_i);
 	}
 
+	if (strcmp(sub, "vpi") == 0) {
+		if (argc < 6) {
+			shell_error(sh, "vpi <Kp> <Ki> <pll_kp> <pll_ki> [reset: 0|1]");
+			return -EINVAL;
+		}
+		vel_params.kp = strtof(argv[2], NULL);
+		vel_params.ki = strtof(argv[3], NULL);
+		vel_params.pll_kp = strtof(argv[4], NULL);
+		vel_params.pll_ki = strtof(argv[5], NULL);
+		reset_i = (argc >= 7) && (strtoul(argv[6], NULL, 10) != 0U);
+		return motor_algo_velocity_pi_set_params(m, &vel_params, reset_i);
+	}
+
+	if (strcmp(sub, "vimax") == 0) {
+		if (argc < 3) {
+			shell_error(sh, "vimax <A>");
+			return -EINVAL;
+		}
+		err = motor_algo_velocity_pi_get_limits(m, &vel_lim);
+		if (err != 0) {
+			return err;
+		}
+		vel_lim.i_max_a = strtof(argv[2], NULL);
+		return motor_algo_velocity_pi_set_limits(m, &vel_lim);
+	}
+
 	shell_error(sh, "unknown: %s", sub);
 	return -EINVAL;
 }
 
 SHELL_CMD_ARG_REGISTER(motor, NULL,
-		       "Motor control: list, use, enable, current, velocity, pi, adrc, imax, …",
+		       "Motor control: list, use, enable, current, velocity, pi, adrc, imax, vpi, vimax, …",
 		       cmd_motor, 1, 8);
