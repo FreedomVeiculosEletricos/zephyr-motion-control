@@ -2,8 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 description: |
-  STM32: injected ADC sequence, software trigger from motor_sensor_start_sample.
-  JEOC ISR latches all ranks; optional Zephyr sensor for angle via feedback-sensor.
+  STM32: injected ADC sequence latched by the JEOC ISR, with an optional Zephyr
+  sensor for angle via feedback-sensor.
+
+  The conversion is started either from software in the PWM update ISR or by the
+  TRGO of the paired actuator's timer; see adc-trigger.
 
 compatible: "zephyr,motor-sensor-stm32"
 
@@ -14,3 +17,27 @@ properties:
     type: int
     required: false
     description: NVIC priority for ADC interrupt (default Kconfig).
+
+  adc-trigger:
+    type: string
+    required: false
+    default: "software"
+    enum:
+      - software
+      - actuator-trgo
+    description: |
+      What starts an injected conversion.
+
+      "software" starts it from the PWM update ISR (JEXTEN stays cleared). The
+      sampling instant then carries the interrupt latency and whatever the
+      control pipeline did before the start, so it lands at an arbitrary point
+      of the switching cycle and the reading picks up the switching ripple
+      instead of averaging through it.
+
+      "actuator-trgo" points JEXTSEL at the TRGO of the timer behind
+      sync-actuator, so the hardware starts the conversion at the same point of
+      every period with no CPU involvement. Where in the period that is comes
+      from the actuator's trgo-source: "update" samples at the period boundary,
+      "compare_pulse" samples at the programmable offset set by
+      adc-sample-offset-ns. The timer must have a TRGO that this ADC can select
+      as an injected trigger; init fails with -ENOTSUP otherwise.

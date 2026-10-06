@@ -50,7 +50,17 @@ struct motor_actuator_stm32_config {
 	uint8_t n_half_bridges;
 	bool single_ended;
 	uint32_t pwm_freq_hz;
+	/* Counter runs up and down, so every leg's pulse is centred on the
+	 * valley of the count instead of starting at the period boundary.
+	 */
+	bool center_aligned;
 	uint32_t trgo;
+	/* trgo rides on the CC1 compare match, so CC1 has to be programmed and
+	 * kept out of pwm-channels.
+	 */
+	bool trgo_on_cc1;
+	bool expose_trigger;
+	uint32_t sample_offset_ns;
 	uint32_t deadtime_ns;
 	struct gpio_dt_spec nfault;
 	struct gpio_dt_spec nsleep;
@@ -74,7 +84,9 @@ struct motor_actuator_stm32_data {
 	struct gpio_callback nfault_cb;
 	atomic_t slow_timer_running;
 	uint32_t slow_timer_ticks;
-	/* Cached at init: ARR + 1 = full-scale duty for oc_set_compare(). */
+	/* Cached at init: full-scale duty for oc_set_compare(), ARR + 1 when
+	 * edge-aligned and ARR when center-aligned.
+	 */
 	uint32_t max_duty;
 	uint32_t fault_flags;
 	/* Leg left at zero duty by the last set_duty, or MOTOR_ACTUATOR_LEG_NONE.
@@ -107,6 +119,8 @@ static void nfault_gpio_cb(const struct device *dev, struct gpio_callback *cb, u
 				 : (DT_ENUM_IDX(DT_DRV_INST(inst), trgo_source) == 2)                    \
 						 ? LL_TIM_TRGO_ENABLE                               \
 						 : LL_TIM_TRGO_CC1IF)
+
+#define MOTOR_ACTUATOR_STM32_TRGO_IS_CC1(inst) (DT_ENUM_IDX(DT_DRV_INST(inst), trgo_source) == 3)
 
 static bool tim_is_advanced(const TIM_TypeDef *tim)
 {
@@ -231,8 +245,79 @@ static void oc_set_complementary_pwm(TIM_TypeDef *tim, uint8_t ch, uint32_t puls
 	LL_TIM_CC_EnableChannel(tim, pair);
 }
 
-static int tim_base_init(TIM_TypeDef *tim, uint32_t tim_clk, uint32_t freq_hz, uint32_t *arr_out)
+/* Move the exported trigger off the period boundary and onto a compare match,
+ * so whoever consumes TRGO samples at a chosen point inside the period instead
+ * of at the instant every compare register reloads.
+ *
+ * CC1 is programmed as an output compare but its output stays disabled: the
+ * match still raises CC1IF, which is what TRGO exports, while nothing can reach
+ * a pin even if one is muxed to the channel.
+ */
+static int tim_adc_trigger_cc1_init(TIM_TypeDef *tim, uint32_t max_duty, uint32_t period_ns,
+				    uint32_t offset_ns, bool center_aligned, bool expose)
 {
+	uint32_t ccr;
+
+	if ((tim == NULL) || (max_duty == 0U) || (period_ns == 0U)) {
+		return -EINVAL;
+	}
+
+	if (center_aligned) {
+		/* Every leg's high pulse is centred on the valley of the count,
+		 * so that is where the current sense is quietest whatever the duty.
+		 * CNT passes 1 on both sides of the valley, but the counter
+		 * mode only raises compare flags while counting down, so
+		 * CCR1 = 1 fires once, one tick before the centre. The offset
+		 * advances it from there: the count spans 2 * ARR ticks per
+		 * period, and has to stay on the falling slope.
+		 */
+		ccr = 1U + (uint32_t)(((uint64_t)offset_ns * 2ULL * (uint64_t)max_duty) /
+				      (uint64_t)period_ns);
+		if (ccr > (max_duty - 1U)) {
+			LOG_WRN("adc-sample-offset-ns %u does not fit half of the %u ns period; "
+				"sampling at the peak",
+				offset_ns, period_ns);
+			ccr = max_duty - 1U;
+		}
+	} else {
+		ccr = (uint32_t)(((uint64_t)offset_ns * (uint64_t)max_duty) / (uint64_t)period_ns);
+		if (ccr > (max_duty - 1U)) {
+			LOG_WRN("adc-sample-offset-ns %u does not fit the %u ns period; "
+				"sampling at its end",
+				offset_ns, period_ns);
+			ccr = max_duty - 1U;
+		}
+	}
+
+	/* The exposed output has to rise on the compare match that starts the
+	 * conversion, so a scope can trigger on that edge. Edge-aligned, that
+	 * is PWM mode 2. Center-aligned, PWM mode 1 goes active as the count
+	 * falls through CCR1, giving a pulse centred on the valley exactly like
+	 * the legs', whose rising edge is the sampling instant.
+	 */
+	LL_TIM_OC_SetMode(tim, LL_TIM_CHANNEL_CH1,
+			  (expose && !center_aligned) ? LL_TIM_OCMODE_PWM2 : LL_TIM_OCMODE_PWM1);
+	LL_TIM_OC_SetCompareCH1(tim, ccr);
+
+	if (expose) {
+		LL_TIM_CC_EnableChannel(tim, LL_TIM_CHANNEL_CH1);
+	} else {
+		LL_TIM_CC_DisableChannel(tim, LL_TIM_CHANNEL_CH1);
+	}
+
+	return 0;
+}
+
+/* Program the time base and report the full-scale compare value.
+ *
+ * Edge-aligned, the counter spans ARR + 1 ticks per period and so does full
+ * duty. Center-aligned, it climbs to ARR and back, 2 * ARR ticks per period,
+ * and a compare of ARR already holds the output active for all of them.
+ */
+static int tim_base_init(TIM_TypeDef *tim, uint32_t tim_clk, uint32_t freq_hz,
+			 bool center_aligned, uint32_t *max_duty_out)
+{
+	uint32_t ticks_per_period = center_aligned ? 2U : 1U;
 	uint32_t psc = 0U;
 	uint32_t arr;
 
@@ -240,42 +325,51 @@ static int tim_base_init(TIM_TypeDef *tim, uint32_t tim_clk, uint32_t freq_hz, u
 		return -EINVAL;
 	}
 
-	arr = tim_clk / freq_hz;
-	if (arr == 0U) {
-		LOG_ERR("PWM frequency %u Hz is above the %u Hz timer clock", freq_hz, tim_clk);
+	arr = tim_clk / (freq_hz * ticks_per_period);
+	if (arr < 2U) {
+		LOG_ERR("PWM frequency %u Hz is too close to the %u Hz timer clock", freq_hz,
+			tim_clk);
 		return -EINVAL;
 	}
-	arr -= 1U;
 
 	while (arr > 0xFFFFUL) {
 		psc++;
-		arr = (tim_clk / (freq_hz * (psc + 1U))) - 1U;
 		if (psc > 0xFFFFUL) {
 			return -EINVAL;
 		}
+		arr = tim_clk / (freq_hz * ticks_per_period * (psc + 1U));
+	}
+
+	if (!center_aligned) {
+		arr -= 1U;
 	}
 
 	LL_TIM_SetPrescaler(tim, psc);
 	LL_TIM_SetAutoReload(tim, arr);
-	LL_TIM_SetCounterMode(tim, LL_TIM_COUNTERMODE_UP);
+	/* Center-aligned mode 1 raises compare flags only on the way down, so
+	 * a CC1 match near the valley exports one TRGO per period rather than
+	 * one on each slope.
+	 */
+	LL_TIM_SetCounterMode(tim, center_aligned ? LL_TIM_COUNTERMODE_CENTER_DOWN
+						  : LL_TIM_COUNTERMODE_UP);
 	LL_TIM_SetClockDivision(tim, LL_TIM_CLOCKDIVISION_DIV1);
 	LL_TIM_EnableARRPreload(tim);
 
-	if (arr_out != NULL) {
-		*arr_out = arr;
+	if (max_duty_out != NULL) {
+		*max_duty_out = center_aligned ? arr : (arr + 1U);
 	}
 
 	return 0;
 }
 
-static int tim_gp_pwm_init(TIM_TypeDef *tim, uint32_t tim_clk, uint32_t freq_hz, const uint8_t *ch,
-			   uint8_t n_ch, uint32_t trgo, uint32_t *max_duty_out)
+static int tim_gp_pwm_init(TIM_TypeDef *tim, uint32_t tim_clk, uint32_t freq_hz,
+			   bool center_aligned, const uint8_t *ch, uint8_t n_ch, uint32_t trgo,
+			   uint32_t *max_duty_out)
 {
 	int err;
-	uint32_t arr;
 	uint8_t i;
 
-	err = tim_base_init(tim, tim_clk, freq_hz, &arr);
+	err = tim_base_init(tim, tim_clk, freq_hz, center_aligned, max_duty_out);
 	if (err != 0) {
 		return err;
 	}
@@ -288,23 +382,18 @@ static int tim_gp_pwm_init(TIM_TypeDef *tim, uint32_t tim_clk, uint32_t freq_hz,
 	LL_TIM_GenerateEvent_UPDATE(tim);
 	LL_TIM_EnableCounter(tim);
 
-	if (max_duty_out != NULL) {
-		*max_duty_out = arr + 1U;
-	}
-
 	return 0;
 }
 
-static int tim_hbridge_init(TIM_TypeDef *tim, uint32_t tim_clk, uint32_t freq_hz, const uint8_t *ch,
-			    uint8_t n_ch, uint32_t deadtime_ns, uint32_t trgo,
-			    uint32_t *max_duty_out)
+static int tim_hbridge_init(TIM_TypeDef *tim, uint32_t tim_clk, uint32_t freq_hz,
+			    bool center_aligned, const uint8_t *ch, uint8_t n_ch,
+			    uint32_t deadtime_ns, uint32_t trgo, uint32_t *max_duty_out)
 {
 	int err;
-	uint32_t arr;
 	uint8_t dtg;
 	uint8_t i;
 
-	err = tim_base_init(tim, tim_clk, freq_hz, &arr);
+	err = tim_base_init(tim, tim_clk, freq_hz, center_aligned, max_duty_out);
 	if (err != 0) {
 		return err;
 	}
@@ -319,10 +408,6 @@ static int tim_hbridge_init(TIM_TypeDef *tim, uint32_t tim_clk, uint32_t freq_hz
 	LL_TIM_SetTriggerOutput(tim, trgo);
 	LL_TIM_GenerateEvent_UPDATE(tim);
 	LL_TIM_EnableCounter(tim);
-
-	if (max_duty_out != NULL) {
-		*max_duty_out = arr + 1U;
-	}
 
 	return 0;
 }
@@ -588,15 +673,36 @@ static int motor_actuator_stm32_hw_init(const struct device *dev)
 	}
 
 	if (cfg->single_ended && !tim_is_advanced(cfg->tim)) {
-		err = tim_gp_pwm_init(cfg->tim, tim_clk_hz, cfg->pwm_freq_hz, cfg->pwm_ch,
-				      cfg->n_half_bridges, cfg->trgo, &data->max_duty);
+		err = tim_gp_pwm_init(cfg->tim, tim_clk_hz, cfg->pwm_freq_hz, cfg->center_aligned,
+				      cfg->pwm_ch, cfg->n_half_bridges, cfg->trgo, &data->max_duty);
 	} else {
-		err = tim_hbridge_init(cfg->tim, tim_clk_hz, cfg->pwm_freq_hz, cfg->pwm_ch,
-				       cfg->n_half_bridges, cfg->deadtime_ns, cfg->trgo,
-				       &data->max_duty);
+		err = tim_hbridge_init(cfg->tim, tim_clk_hz, cfg->pwm_freq_hz, cfg->center_aligned,
+				       cfg->pwm_ch, cfg->n_half_bridges, cfg->deadtime_ns,
+				       cfg->trgo, &data->max_duty);
 	}
 	if (err != 0) {
 		return err;
+	}
+
+	if (cfg->trgo_on_cc1) {
+		uint8_t leg;
+
+		for (leg = 0U; leg < cfg->n_half_bridges; leg++) {
+			if (cfg->pwm_ch[leg] == 1U) {
+				LOG_ERR("trgo-source \"compare_pulse\" programs CC1 as the sampling "
+					"point, but pwm-channels drives leg %u from it",
+					leg);
+				return -EINVAL;
+			}
+		}
+
+		err = tim_adc_trigger_cc1_init(cfg->tim, data->max_duty,
+					       cfg->stage_cfg.pwm_period_ns,
+					       cfg->sample_offset_ns, cfg->center_aligned,
+					       cfg->expose_trigger);
+		if (err != 0) {
+			return err;
+		}
 	}
 
 	if (!device_is_ready(cfg->slow_timer)) {
@@ -704,6 +810,15 @@ const struct motor_actuator_ops motor_actuator_stm32_api = {
 		if ((LL_TIM_IsActiveFlag_UPDATE(tim) != 0UL) &&                                      \
 		    (LL_TIM_IsEnabledIT_UPDATE(tim) != 0U)) {                                        \
 			LL_TIM_ClearFlag_UPDATE(tim);                                               \
+			/* Center-aligned counters update at the valley and at     \
+			 * the peak. Only the peak runs the loop: it lands half a  \
+			 * period after the valley sample, with the conversion     \
+			 * done, and the duty it writes loads at the next valley.  \
+			 */                                                          \
+			if (cfg->center_aligned &&                                                   \
+			    (LL_TIM_GetDirection(tim) != LL_TIM_COUNTERDIRECTION_DOWN)) {             \
+				return 0;                                                            \
+			}                                                                            \
 			if (data->actuator_cb != NULL) {                                             \
 				data->actuator_cb(dev, data->actuator_user_data);                    \
 			}                                                                            \
@@ -722,7 +837,11 @@ const struct motor_actuator_ops motor_actuator_stm32_api = {
 		.n_half_bridges = (uint8_t)ARRAY_SIZE(pwm_ch_array_##inst),                        \
 		.single_ended = DT_INST_PROP_OR(inst, single_ended, 0),                            \
 		.pwm_freq_hz = (uint32_t)DT_INST_PROP(inst, pwm_frequency),                       \
+		.center_aligned = DT_INST_PROP(inst, center_aligned),                              \
 		.trgo = MOTOR_ACTUATOR_STM32_TRGO_FROM_ENUM(inst),                                          \
+		.trgo_on_cc1 = MOTOR_ACTUATOR_STM32_TRGO_IS_CC1(inst),                                     \
+		.expose_trigger = DT_INST_PROP(inst, expose_adc_trigger),                                  \
+		.sample_offset_ns = (uint32_t)DT_INST_PROP(inst, adc_sample_offset_ns),                    \
 		.deadtime_ns = (uint32_t)DT_INST_PROP(inst, deadtime_ns),                         \
 		.nfault = GPIO_DT_SPEC_INST_GET_OR(inst, nfault_gpios, {0}),                        \
 		.nsleep = GPIO_DT_SPEC_INST_GET_OR(inst, nsleep_gpios, {0}),                        \
@@ -749,6 +868,10 @@ const struct motor_actuator_ops motor_actuator_stm32_api = {
 				.i_peak_limit = 20.0f,                                               \
 			},                                                                            \
 	};                                                                                           \
+	BUILD_ASSERT(!DT_INST_PROP(inst, center_aligned) ||                                        \
+			     (DT_INST_ENUM_IDX(inst, trgo_source) != 0),                           \
+		     "center-aligned updates twice per period, so trgo-source \"update\" would "  \
+		     "trigger the ADC twice; use \"compare_pulse\"");                                \
 	BUILD_ASSERT(ARRAY_SIZE(pwm_ch_array_##inst) >= 1U &&                                      \
 			     ARRAY_SIZE(pwm_ch_array_##inst) <= HB_MAX,                              \
 		     "pwm-channels: length must be 1..3");                                         \
@@ -766,8 +889,10 @@ const struct motor_actuator_ops motor_actuator_stm32_api = {
 	BUILD_ASSERT(!DT_INST_PROP(inst, single_ended) ||                                          \
 			     (COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, pinctrl_1),                  \
 					  (DT_INST_PROP_LEN(inst, pinctrl_1)), (0U)) ==        \
-			      ARRAY_SIZE(pwm_ch_array_##inst)),                                    \
-		     "single-ended requires pinctrl-1 with len(pwm-channels) HS-only pins");      \
+			      (ARRAY_SIZE(pwm_ch_array_##inst) +                                   \
+			       (DT_INST_PROP(inst, expose_adc_trigger) ? 1U : 0U))),                \
+		     "single-ended requires pinctrl-1 with len(pwm-channels) HS-only pins, "       \
+		     "plus one for channel 1 when expose-adc-trigger is set");                     \
 	static struct motor_actuator_stm32_data motor_actuator_stm32_data_##inst;                    \
 	static int motor_actuator_stm32_dev_init_##inst(const struct device *dev)                       \
 	{                                                                                            \

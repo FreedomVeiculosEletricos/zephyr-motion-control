@@ -5,9 +5,11 @@ description: |
   STM32 motor power stage using ST LL timer APIs directly (no Zephyr PWM on the
   hot path). Each entry in pwm-channels selects one timer channel (1..4) that
   drives one half-bridge leg as a complementary HS/LS pair (CHx + CHxN) with
-  hardware dead-time. The referenced timer MUST be an advanced timer with the
-  "brk" interrupt (TIM1 / TIM8 on STM32G4 etc.); non-advanced timers are
-  rejected at build time.
+  hardware dead-time. A timer with complementary outputs and a "brk" interrupt
+  (TIM1 / TIM8 on STM32G4 etc.) is required for that mode and is checked at
+  build time. General-purpose timers are allowed only together with
+  "single-ended", where the gate driver produces the low side and the timer
+  never needs a complementary output.
 
   By default, pinctrl state "complementary" is applied with 2 * len(pwm-channels)
   pin entries (HS + LS per leg). When the optional "single-ended" flag is set,
@@ -16,8 +18,9 @@ description: |
   generates the complementary signal internally — it just is not routed to a
   pin in that mode.
 
-  Use one timer instance for all legs so ADC TRGO and switching stay
-  synchronized. Disable the Zephyr pwm child node for the same timer
+  Use one timer instance for all legs so switching stays coherent across the
+  bridge, and so the single TRGO this node exports lines current sampling up
+  with it. Disable the Zephyr pwm child node for the same timer
   (status = "disabled") so the peripheral is not claimed twice.
 
 compatible: "zephyr,motor-stage-hbridge-stm32"
@@ -29,9 +32,11 @@ properties:
     type: phandle
     required: true
     description: |
-      Advanced timer instance with complementary outputs and "brk" interrupt
-      (e.g. &timers1, &timers8). Must match adc-trigger-timer on the
-      motor-sensor-stm32 node (software-triggered ADC) paired with this stage.
+      Timer instance driving the bridge (e.g. &timers1, &timers8, or a
+      general-purpose timer such as &timers2 when single-ended is set). This is
+      also the timer whose TRGO a paired motor-sensor-stm32 node selects when
+      its adc-trigger is "actuator-trgo", so it must have a TRGO that the ADC
+      accepts as an injected trigger.
 
   pwm-channels:
     type: array
@@ -52,5 +57,72 @@ properties:
       - enable
       - compare_pulse
     description: |
-      TIM TRGO output selection (maps to STM32 LL_TIM_TRGO_*). Use update for
-      edge-aligned PWM so each period triggers one ADC sequence.
+      TIM TRGO output selection (maps to STM32 LL_TIM_TRGO_*). This only picks
+      what the timer exports; it has no effect until something consumes it,
+      which today means a motor-sensor-stm32 node with
+      adc-trigger = "actuator-trgo".
+
+      "update" fires once per period at the period boundary, which with
+      edge-aligned PWM is the instant both compare registers reload. It is
+      rejected with center-aligned, where the counter updates twice per period.
+
+      "compare_pulse" fires on the CC1 compare match instead, putting the
+      trigger at the programmable offset given by adc-sample-offset-ns. Use it
+      to move current sampling away from the switching edge. Channel 1 must not
+      be listed in pwm-channels, since the stage programs CC1 for this purpose.
+      With center-aligned, it fires at the centre of every leg's high pulse.
+
+  center-aligned:
+    type: boolean
+    description: |
+      Count up to ARR and back down instead of up and wrapping, keeping
+      pwm-frequency as the full up-and-down period. Every leg runs PWM mode 1,
+      so its high pulse is centred on the valley of the count whatever the
+      duty. Both switching edges sit symmetrically around that point, as far
+      from it as the duty allows.
+
+      With trgo-source = "compare_pulse", the ADC is triggered at that centre,
+      in the middle of the high pulse. The actuator callback runs from the
+      update at the peak of the count, half a period later, so the conversion
+      has finished by then; the duty it writes is loaded at the next valley.
+
+      Without a repetition counter the compare registers also reload at the
+      peak, so a new duty takes effect half-way through the pulse it lands
+      in: that pulse is asymmetric, and the next one is centred again.
+
+  expose-adc-trigger:
+    type: boolean
+    description: |
+      Drive the CC1 compare match out on a pin, so a scope can see exactly when
+      the ADC conversion is triggered. Only meaningful with
+      trgo-source = "compare_pulse".
+
+      The output rises on the compare match that starts the conversion. With
+      edge-aligned PWM, the channel is put in PWM mode 2 and falls at the period
+      boundary. With center-aligned, it is put in PWM mode 1 and forms a pulse
+      centred on the valley like the legs', twice adc-sample-offset-ns wide (a
+      couple of timer ticks at the default of 0). The edge is produced by the
+      timer itself, carrying no interrupt latency, so it marks the sampling
+      instant rather than an approximation of it.
+
+      Requires one extra pin entry in the pinctrl states, for the timer's
+      channel 1, beyond the one per entry in pwm-channels. Bench instrument:
+      leave it off in production, where it only wastes a pin.
+
+  adc-sample-offset-ns:
+    type: int
+    required: false
+    default: 0
+    description: |
+      Offset from the start of the PWM period to the CC1 compare match, in
+      nanoseconds. Only meaningful with trgo-source = "compare_pulse".
+
+      With center-aligned, it is instead how far before the centre of the high
+      pulse the conversion starts, and must stay under half the period. Leave
+      it at 0 to sample at the centre; raise it to centre the ADC sampling
+      window rather than its start on the pulse.
+
+      The point has to clear the switching transition of the modulating leg for
+      the current sense to be quiet, and must stay inside the period; the driver clamps
+      it to the period and warns. A value close to the end of the period places
+      the conversion just before the update ISR that consumes it.

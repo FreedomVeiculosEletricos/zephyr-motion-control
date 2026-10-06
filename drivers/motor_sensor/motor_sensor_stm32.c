@@ -13,6 +13,7 @@
 
 #include <stm32_ll_adc.h>
 #include <stm32_ll_system.h>
+#include <stm32_ll_tim.h>
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -115,6 +116,11 @@ struct motor_sensor_stm32_config {
 	const struct stm32_pclken *pclken;
 	size_t pclk_len;
 	uint32_t adc_common_clock;
+	/* Timer behind sync_actuator, whose TRGO starts the conversion when
+	 * hw_trigger is set. NULL when the paired stage has no timer to offer.
+	 */
+	TIM_TypeDef *sync_tim;
+	bool hw_trigger;
 	/* Which bridge leg each injected rank measures, or NULL when the board
 	 * did not say. Indexes run parallel to adc_ch_decimal.
 	 */
@@ -378,8 +384,108 @@ static uint32_t inj_seq_len_from_n(uint8_t n)
 	}
 }
 
+/* Which JEXTSEL value carries this timer's TRGO.
+ *
+ * Only a handful of timers are wired to the injected trigger mux, and the set
+ * differs per series, so a stage timer that is perfectly good at making PWM may
+ * still have no way to start a conversion. Saying so at init beats sampling
+ * that silently never happens.
+ */
+static int inj_trigger_from_tim(const TIM_TypeDef *tim, uint32_t *out)
+{
+	if ((tim == NULL) || (out == NULL)) {
+		return -EINVAL;
+	}
+
+#if defined(TIM1) && defined(LL_ADC_INJ_TRIG_EXT_TIM1_TRGO)
+	if (tim == TIM1) {
+		*out = LL_ADC_INJ_TRIG_EXT_TIM1_TRGO;
+		return 0;
+	}
+#endif
+#if defined(TIM2) && defined(LL_ADC_INJ_TRIG_EXT_TIM2_TRGO)
+	if (tim == TIM2) {
+		*out = LL_ADC_INJ_TRIG_EXT_TIM2_TRGO;
+		return 0;
+	}
+#endif
+#if defined(TIM3) && defined(LL_ADC_INJ_TRIG_EXT_TIM3_TRGO)
+	if (tim == TIM3) {
+		*out = LL_ADC_INJ_TRIG_EXT_TIM3_TRGO;
+		return 0;
+	}
+#endif
+#if defined(TIM4) && defined(LL_ADC_INJ_TRIG_EXT_TIM4_TRGO)
+	if (tim == TIM4) {
+		*out = LL_ADC_INJ_TRIG_EXT_TIM4_TRGO;
+		return 0;
+	}
+#endif
+#if defined(TIM6) && defined(LL_ADC_INJ_TRIG_EXT_TIM6_TRGO)
+	if (tim == TIM6) {
+		*out = LL_ADC_INJ_TRIG_EXT_TIM6_TRGO;
+		return 0;
+	}
+#endif
+#if defined(TIM8) && defined(LL_ADC_INJ_TRIG_EXT_TIM8_TRGO)
+	if (tim == TIM8) {
+		*out = LL_ADC_INJ_TRIG_EXT_TIM8_TRGO;
+		return 0;
+	}
+#endif
+#if defined(TIM15) && defined(LL_ADC_INJ_TRIG_EXT_TIM15_TRGO)
+	if (tim == TIM15) {
+		*out = LL_ADC_INJ_TRIG_EXT_TIM15_TRGO;
+		return 0;
+	}
+#endif
+
+	return -ENOTSUP;
+}
+
+static int adc_inj_set_trigger(const struct motor_sensor_stm32_config *cfg, ADC_TypeDef *adc,
+			       bool hw_trigger)
+{
+	uint32_t trig;
+	int err;
+
+	if (!hw_trigger) {
+		/* Conversions are started from the PWM update ISR, so JEXTEN must
+		 * stay cleared. Programming a trigger edge here shares the same
+		 * register field and would arm an external trigger that never
+		 * fires.
+		 */
+		LL_ADC_INJ_SetTriggerSource(adc, LL_ADC_INJ_TRIG_SOFTWARE);
+		return 0;
+	}
+
+	err = inj_trigger_from_tim(cfg->sync_tim, &trig);
+	if (err != 0) {
+		LOG_ERR("the stage timer has no TRGO this ADC can use as an injected trigger");
+		return err;
+	}
+
+#if defined(LL_ADC_INJ_QUEUE_DISABLE)
+	/* Out of reset the injected context queue is enabled: it serves the
+	 * configured context once and then leaves the group with an empty queue,
+	 * where every further trigger is ignored. One sequence lives here
+	 * forever, so the queue has nothing to offer and only takes away.
+	 */
+	LL_ADC_INJ_SetQueueMode(adc, LL_ADC_INJ_QUEUE_DISABLE);
+#endif
+
+	/* Source before edge: both write JEXTEN, and doing it the other way
+	 * around leaves the source overwritten by the edge write.
+	 */
+	LL_ADC_INJ_SetTriggerSource(adc, trig);
+	LL_ADC_INJ_SetTriggerEdge(adc, LL_ADC_INJ_TRIG_EXT_RISING);
+
+	return 0;
+}
+
 static int adc_inj_configure(const struct motor_sensor_stm32_config *cfg,
-			     const uint32_t *ch_decimal, uint8_t n, uint8_t resolution_bits)
+			     const uint32_t *ch_decimal, uint8_t n, uint8_t resolution_bits,
+			     bool hw_trigger)
 {
 	ADC_TypeDef *adc = (cfg != NULL) ? cfg->adc : NULL;
 	uint32_t common_clock;
@@ -401,6 +507,21 @@ static int adc_inj_configure(const struct motor_sensor_stm32_config *cfg,
 	LL_ADC_DisableDeepPowerDown(adc);
 	LL_ADC_EnableInternalRegulator(adc);
 	k_busy_wait(LL_ADC_DELAY_INTERNAL_REGUL_STAB_US);
+
+	/* An external trigger leaves the injected group armed indefinitely, and
+	 * JADSTART has to be clear before the ADC can be disabled. calibrate()
+	 * reconfigures while the stage timer keeps running, so disarming here is
+	 * what stops that from racing conversions the hardware is still
+	 * starting.
+	 */
+	if (LL_ADC_INJ_IsConversionOngoing(adc) != 0UL) {
+		LL_ADC_INJ_StopConversion(adc);
+		err = MOTOR_STM32_ADC_WAIT_FOR(LL_ADC_INJ_IsStopConversionOngoing(adc) == 0UL,
+					       "the injected group to stop");
+		if (err != 0) {
+			return err;
+		}
+	}
 
 	/* Calibration is only latched with ADEN cleared. Reconfiguring an ADC
 	 * that is already converting (calibrate() comes back here per channel)
@@ -450,11 +571,10 @@ static int adc_inj_configure(const struct motor_sensor_stm32_config *cfg,
 
 	LL_ADC_INJ_SetSequencerLength(adc, inj_seq_len_from_n(n));
 	LL_ADC_INJ_SetTrigAuto(adc, LL_ADC_INJ_TRIG_INDEPENDENT);
-	/* Conversions are started from the PWM update ISR, so JEXTEN must stay
-	 * cleared. Programming a trigger edge here shares the same register
-	 * field and would arm an external trigger that never fires.
-	 */
-	LL_ADC_INJ_SetTriggerSource(adc, LL_ADC_INJ_TRIG_SOFTWARE);
+	err = adc_inj_set_trigger(cfg, adc, hw_trigger);
+	if (err != 0) {
+		return err;
+	}
 
 	for (i = 0U; i < n; i++) {
 		uint32_t ch = __LL_ADC_DECIMAL_NB_TO_CHANNEL(ch_decimal[i]);
@@ -602,6 +722,14 @@ static int motor_sensor_stm32_start_sample(const struct device *dev, enum motor_
 
 	switch (ch) {
 	case MOTOR_SENSOR_CHAN_CURRENT:
+		if (cfg->hw_trigger && (LL_ADC_INJ_IsConversionOngoing(cfg->adc) != 0UL)) {
+			/* With an external trigger JADSTART arms the group rather
+			 * than starting it, and stays set while armed. The timer
+			 * drives every conversion from there, so the per-tick call
+			 * has nothing left to do.
+			 */
+			return 0;
+		}
 		LL_ADC_INJ_StartConversion(cfg->adc);
 		return 0;
 	case MOTOR_SENSOR_CHAN_CURRENT_BRIDGE:
@@ -707,7 +835,11 @@ static int motor_sensor_stm32_calibrate(const struct device *dev, enum motor_sen
 		int err;
 		int s;
 
-		err = adc_inj_configure(cfg, &data->adc_ch_decimal[i], 1, cfg->resolution_bits);
+		/* adc_inj_sw_read() polls JEOC after starting the conversion
+		 * itself, which an external trigger would never let happen.
+		 */
+		err = adc_inj_configure(cfg, &data->adc_ch_decimal[i], 1, cfg->resolution_bits,
+					false);
 		if (err != 0) {
 			return err;
 		}
@@ -727,7 +859,7 @@ static int motor_sensor_stm32_calibrate(const struct device *dev, enum motor_sen
 	}
 
 	return adc_inj_configure(cfg, data->adc_ch_decimal, data->n_adc_channels,
-				 cfg->resolution_bits);
+				 cfg->resolution_bits, cfg->hw_trigger);
 }
 
 static bool motor_sensor_stm32_channel_supported(const struct device *dev,
@@ -788,6 +920,17 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 		    (CONCAT(SENSOR_STM32_ADC_CLOCK_PREFIX(inst),                                   \
 			    DT_PROP(DT_INST_PHANDLE(inst, adc), st_adc_prescaler))),                \
 		    (LL_ADC_CLOCK_ASYNC_DIV1))
+/* The stage keeps its timer private, but the node it came from is right there in
+ * sync-actuator, so the trigger source can be resolved without a new op.
+ */
+#define SENSOR_STM32_SYNC_TIM(inst)                                                                \
+	COND_CODE_1(DT_NODE_HAS_PROP(DT_INST_PHANDLE(inst, sync_actuator), st_pwm_timer),          \
+		    ((TIM_TypeDef *)DT_REG_ADDR(                                                   \
+			    DT_PHANDLE(DT_INST_PHANDLE(inst, sync_actuator), st_pwm_timer))),      \
+		    (NULL))
+
+#define SENSOR_STM32_HW_TRIGGER(inst) (DT_INST_ENUM_IDX(inst, adc_trigger) == 1)
+
 #define SENSOR_STM32_SENSE_LEGS_DEFINE(inst)                                                       \
 	IF_ENABLED(DT_INST_NODE_HAS_PROP(inst, current_sense_legs),                                \
 		   (static const uint8_t motor_sensor_stm32_sense_leg_##inst[] =                   \
@@ -823,6 +966,8 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 		.pclken = motor_sensor_stm32_pclken_##inst,                                        \
 		.pclk_len = ARRAY_SIZE(motor_sensor_stm32_pclken_##inst),                          \
 		.adc_common_clock = SENSOR_STM32_ADC_COMMON_CLOCK(inst),                           \
+		.sync_tim = SENSOR_STM32_SYNC_TIM(inst),                                           \
+		.hw_trigger = SENSOR_STM32_HW_TRIGGER(inst),                                       \
 		.sense_leg = SENSOR_STM32_SENSE_LEGS(inst),                                        \
 		.feedback_sensor =                                                                   \
 			COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, feedback_sensor),                    \
@@ -897,7 +1042,7 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 		data->bridge_current_a = 0.0f;                                                     \
 		data->bridge_current_valid = false;                                                \
 		err = adc_inj_configure(cfg, data->adc_ch_decimal, data->n_adc_channels,            \
-					cfg->resolution_bits);                                      \
+					cfg->resolution_bits, cfg->hw_trigger);                     \
 		if (err != 0) {                                                                    \
 			return err;                                                                \
 		}                                                                                  \
