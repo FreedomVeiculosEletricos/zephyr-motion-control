@@ -70,8 +70,13 @@ void motor_velocity_pi_block_entry(struct motor_block *self, const struct motor_
 				st->state.i_ref_a = 0.0f;
 			}
 
-			/* The loop is open here: nothing would ever unwind these. */
-			st->i_integral = 0.0f;
+			/* Preload the integrator with the current already flowing,
+			 * so the loop takes over without a step. Starting it at zero
+			 * drops the reference to kp * error the moment the estimate
+			 * validates; if that is below what the load draws, the rotor
+			 * falls back out of the valid band and the startup repeats.
+			 */
+			st->i_integral = st->state.i_ref_a;
 			st->pll_primed = false;
 		}
 

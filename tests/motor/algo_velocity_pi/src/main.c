@@ -155,14 +155,37 @@ ZTEST(motor_algo_velocity_pi_suite, test_open_loop_startup_hands_over_to_closed_
 	for (int i = 0; i < 100; i++) {
 		motor_velocity_pi_block_entry(&vel.base, &in, &out);
 	}
-	zassert_within(vel.i_integral, 0.0f, 1e-6f, "the open loop must not wind up");
+	zassert_within(vel.i_integral, 0.8f, 1e-6f,
+		       "the integrator must carry the startup current, not wind up");
 
+	/* A small error keeps the first closed-loop reference off i_max, where
+	 * a missing preload would show: kp * 5 alone is only 0.5 A.
+	 */
+	vel.state.v_ref_rad_s = 5.0f;
 	sense.angle_valid = true;
 	sense.angle_rad = 0.1f;
 	motor_velocity_pi_block_entry(&vel.base, &in, &out);
 
 	zassert_true(vel.pll_primed, "the PLL must re-prime on the first valid angle");
 	zassert_within(vel.state.theta_hat_rad, 0.1f, 1e-6f, NULL);
+	/* The re-primed PLL reads omega_hat = 0, so the error is the whole 5 rad/s. */
+	zassert_within(out.current_ref_a, 0.8f + 0.1f * 5.0f + 1.0f * 0.001f * 5.0f, 1e-4f,
+		       "the first closed-loop reference must start from the startup current");
+}
+
+ZTEST(motor_algo_velocity_pi_suite, test_open_loop_with_zero_command_clears_integrator)
+{
+	struct motor_algo_velocity_pi_data vel = make_open_loop_startup_vel(0.8f);
+	struct motor_sense_bundle sense = {.angle_valid = false};
+	struct motor_block_in in = {.sense = &sense};
+	struct motor_block_out out = {0};
+
+	vel.i_integral = 1.5f;
+	vel.state.v_ref_rad_s = 0.0f;
+	motor_velocity_pi_block_entry(&vel.base, &in, &out);
+
+	zassert_within(vel.i_integral, 0.0f, 1e-6f,
+		       "a stop below the valid band must not leave current preloaded");
 }
 
 ZTEST(motor_algo_velocity_pi_suite, test_without_startup_current_reference_is_held)
