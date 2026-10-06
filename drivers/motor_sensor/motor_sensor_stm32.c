@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include <stm32_ll_adc.h>
+#include <stm32_ll_system.h>
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -67,12 +68,11 @@ LOG_MODULE_REGISTER(motor_sensor_stm32, CONFIG_MOTOR_DRIVER_LOG_LEVEL);
 #endif
 
 static int motor_sensor_stm32_check_adc_pwm_margin(const struct device *sync_actuator,
-						   uint8_t n_adc_channels)
+						   uint8_t n_adc_channels, uint32_t adc_ker_hz)
 {
 	const struct motor_stage_config *stage = motor_actuator_get_config(sync_actuator);
 	uint64_t pwm_ns;
 	uint64_t tconv_ns;
-	uint32_t adc_ker_hz;
 	uint32_t cyc;
 
 	if (stage == NULL) {
@@ -91,9 +91,8 @@ static int motor_sensor_stm32_check_adc_pwm_margin(const struct device *sync_act
 		return -EINVAL;
 	}
 
-	adc_ker_hz = SystemCoreClock;
 	if (adc_ker_hz < 1000000U) {
-		LOG_ERR("core clock %u Hz is too slow to sample current", adc_ker_hz);
+		LOG_ERR("ADC kernel clock %u Hz is too slow to sample current", adc_ker_hz);
 		return -EINVAL;
 	}
 
@@ -152,6 +151,146 @@ static int motor_sensor_stm32_enable_adc_clock(const struct motor_sensor_stm32_c
 
 	return 0;
 }
+
+/* Divider the LL common-clock constant selects, so the kernel frequency can be
+ * derived from the clock the RCC reports.
+ */
+static uint32_t motor_sensor_stm32_adc_clock_prescaler(uint32_t common_clock)
+{
+	switch (common_clock) {
+#if defined(LL_ADC_CLOCK_SYNC_PCLK_DIV1)
+	case LL_ADC_CLOCK_SYNC_PCLK_DIV1:
+		return 1U;
+	case LL_ADC_CLOCK_SYNC_PCLK_DIV2:
+		return 2U;
+	case LL_ADC_CLOCK_SYNC_PCLK_DIV4:
+		return 4U;
+#endif
+	case LL_ADC_CLOCK_ASYNC_DIV1:
+		return 1U;
+#if defined(LL_ADC_CLOCK_ASYNC_DIV2)
+	case LL_ADC_CLOCK_ASYNC_DIV2:
+		return 2U;
+	case LL_ADC_CLOCK_ASYNC_DIV4:
+		return 4U;
+	case LL_ADC_CLOCK_ASYNC_DIV6:
+		return 6U;
+	case LL_ADC_CLOCK_ASYNC_DIV8:
+		return 8U;
+	case LL_ADC_CLOCK_ASYNC_DIV10:
+		return 10U;
+	case LL_ADC_CLOCK_ASYNC_DIV12:
+		return 12U;
+	case LL_ADC_CLOCK_ASYNC_DIV16:
+		return 16U;
+	case LL_ADC_CLOCK_ASYNC_DIV32:
+		return 32U;
+	case LL_ADC_CLOCK_ASYNC_DIV64:
+		return 64U;
+	case LL_ADC_CLOCK_ASYNC_DIV128:
+		return 128U;
+	case LL_ADC_CLOCK_ASYNC_DIV256:
+		return 256U;
+#endif
+	default:
+		return 0U;
+	}
+}
+
+/* H74x/H75x feed the ADC through a fixed extra /2 on every revision but Y.
+ * It lives in no register, so it has to be applied by hand — adc_stm32.c does
+ * the same thing in adc_stm32_get_input_freq_prescaler().
+ */
+static uint32_t motor_sensor_stm32_adc_extra_divider(void)
+{
+#if defined(CONFIG_SOC_SERIES_STM32H7X) && defined(ADC_VER_V5_X)
+	return (LL_DBGMCU_GetRevisionID() <= 0x1003U) ? 1U : 2U;
+#else
+	return 1U;
+#endif
+}
+
+/* Frequency the converter actually runs at, which is neither the core clock nor
+ * the bus clock the devicetree names.
+ */
+static int motor_sensor_stm32_adc_kernel_freq(const struct motor_sensor_stm32_config *cfg,
+					      uint32_t *freq_hz)
+{
+	const struct device *clk = DEVICE_DT_GET(STM32_CLOCK_CONTROL_NODE);
+	const struct stm32_pclken *src;
+	uint32_t presc;
+	uint32_t freq;
+	bool is_sync;
+	int err;
+
+	presc = motor_sensor_stm32_adc_clock_prescaler(cfg->adc_common_clock);
+	if (presc == 0U) {
+		LOG_ERR("unsupported ADC common clock 0x%08x", cfg->adc_common_clock);
+		return -EINVAL;
+	}
+
+#if defined(ADC_CCR_CKMODE)
+	is_sync = (cfg->adc_common_clock & ADC_CCR_CKMODE) != 0U;
+#else
+	is_sync = false;
+#endif
+
+	/* Synchronous mode runs off the bus clock; asynchronous off the kernel
+	 * clock, which is the second pclken entry when the board supplies one.
+	 */
+	src = (is_sync || (cfg->pclk_len < 2U)) ? &cfg->pclken[0] : &cfg->pclken[1];
+
+	err = clock_control_get_rate(clk, (clock_control_subsys_t)src, &freq);
+	if (err != 0) {
+		LOG_ERR("could not read the ADC input clock (%d)", err);
+		return err;
+	}
+
+	*freq_hz = freq / (presc * motor_sensor_stm32_adc_extra_divider());
+
+	return 0;
+}
+
+#if defined(LL_ADC_BOOST_MODE_6MHZ25)
+/* BOOST sets the bias current of the converter's internal amplifiers and has to
+ * match the kernel frequency. Its reset value covers <= 6.25 MHz only, so
+ * leaving it alone under-biases every ADC clocked faster than that: conversions
+ * still complete, but the result carries an error that grows with how closely
+ * they are spaced. A calibration taken from isolated conversions then fails to
+ * cancel what a back-to-back injected sequence reads.
+ */
+static int motor_sensor_stm32_setup_boost(const struct motor_sensor_stm32_config *cfg,
+					  ADC_TypeDef *adc)
+{
+	uint32_t freq;
+	uint32_t boost;
+	int err;
+
+	err = motor_sensor_stm32_adc_kernel_freq(cfg, &freq);
+	if (err != 0) {
+		return err;
+	}
+
+	if (freq <= KHZ(6250)) {
+		boost = LL_ADC_BOOST_MODE_6MHZ25;
+	} else if (freq <= KHZ(12500)) {
+		boost = LL_ADC_BOOST_MODE_12MHZ5;
+	} else if (freq <= MHZ(20)) {
+		boost = LL_ADC_BOOST_MODE_20MHZ;
+	} else if (freq <= MHZ(25)) {
+		boost = LL_ADC_BOOST_MODE_25MHZ;
+	} else if (freq <= MHZ(50)) {
+		boost = LL_ADC_BOOST_MODE_50MHZ;
+	} else {
+		LOG_ERR("ADC kernel clock is %u Hz, above the 50 MHz maximum", freq);
+		return -ERANGE;
+	}
+
+	LL_ADC_SetBoostMode(adc, boost);
+
+	return 0;
+}
+#endif /* LL_ADC_BOOST_MODE_6MHZ25 */
 
 struct motor_sensor_stm32_data {
 	uint32_t adc_ch_decimal[MOTOR_SENSOR_CURRENT_MAX];
@@ -229,9 +368,11 @@ static uint32_t inj_seq_len_from_n(uint8_t n)
 	}
 }
 
-static int adc_inj_configure(ADC_TypeDef *adc, uint32_t common_clock, const uint32_t *ch_decimal,
-			     uint8_t n, uint8_t resolution_bits)
+static int adc_inj_configure(const struct motor_sensor_stm32_config *cfg,
+			     const uint32_t *ch_decimal, uint8_t n, uint8_t resolution_bits)
 {
+	ADC_TypeDef *adc = (cfg != NULL) ? cfg->adc : NULL;
+	uint32_t common_clock;
 	uint8_t i;
 	uint32_t ll_resolution;
 	int err;
@@ -239,6 +380,8 @@ static int adc_inj_configure(ADC_TypeDef *adc, uint32_t common_clock, const uint
 	if ((adc == NULL) || (ch_decimal == NULL) || (n == 0U) || (n > 4U)) {
 		return -EINVAL;
 	}
+
+	common_clock = cfg->adc_common_clock;
 	if (stm32_ll_adc_resolution_from_bits(resolution_bits, &ll_resolution) != 0) {
 		LOG_ERR("unsupported ADC resolution of %u bits", resolution_bits);
 		return -EINVAL;
@@ -278,6 +421,16 @@ static int adc_inj_configure(ADC_TypeDef *adc, uint32_t common_clock, const uint
 #if defined(LL_ADC_RIGHT_BIT_SHIFT_NONE)
 	LL_ADC_SetDataRightShift(adc, LL_ADC_RIGHT_BIT_SHIFT_NONE);
 #endif
+#if defined(LL_ADC_BOOST_MODE_6MHZ25)
+	/* Written here, with ADEN still clear, because BOOST is latched on
+	 * enable. calibrate() comes back through this function per channel, so
+	 * every reconfiguration reapplies it.
+	 */
+	err = motor_sensor_stm32_setup_boost(cfg, adc);
+	if (err != 0) {
+		return err;
+	}
+#endif
 #else
 	LL_ADC_SetDataAlignment(adc, LL_ADC_DATA_ALIGN_RIGHT);
 	LL_ADC_SetLowPowerMode(adc, LL_ADC_LP_MODE_NONE);
@@ -298,6 +451,16 @@ static int adc_inj_configure(ADC_TypeDef *adc, uint32_t common_clock, const uint
 
 		LL_ADC_INJ_SetSequencerRanks(adc, inj_rank[i], ch);
 		LL_ADC_SetChannelSamplingTime(adc, ch, MOTOR_STM32_ADC_SAMPLE_TIME);
+#if defined(CONFIG_SOC_SERIES_STM32H7X)
+		/* On this series the preselection register is what connects the
+		 * pad to the converter. Leave it clear and the channel still
+		 * converts, on tap of nothing: the result is a parasitic level
+		 * that ignores the pin, sits at roughly the same value on every
+		 * channel, and does not change with sampling time. Every rank
+		 * has to be enabled here.
+		 */
+		LL_ADC_SetChannelPreselection(adc, ch);
+#endif
 	}
 
 	LL_ADC_Enable(adc);
@@ -472,8 +635,7 @@ static int motor_sensor_stm32_calibrate(const struct device *dev, enum motor_sen
 		int err;
 		int s;
 
-		err = adc_inj_configure(cfg->adc, cfg->adc_common_clock, &data->adc_ch_decimal[i],
-					1, cfg->resolution_bits);
+		err = adc_inj_configure(cfg, &data->adc_ch_decimal[i], 1, cfg->resolution_bits);
 		if (err != 0) {
 			return err;
 		}
@@ -492,8 +654,8 @@ static int motor_sensor_stm32_calibrate(const struct device *dev, enum motor_sen
 		data->current_offset[i] = sum * (1.0f / 32.0f);
 	}
 
-	return adc_inj_configure(cfg->adc, cfg->adc_common_clock, data->adc_ch_decimal,
-				 data->n_adc_channels, cfg->resolution_bits);
+	return adc_inj_configure(cfg, data->adc_ch_decimal, data->n_adc_channels,
+				 cfg->resolution_bits);
 }
 
 static bool motor_sensor_stm32_channel_supported(const struct device *dev,
@@ -591,6 +753,7 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 	{                                                                                          \
 		const struct motor_sensor_stm32_config *cfg = dev->config;                         \
 		struct motor_sensor_stm32_data *data = dev->data;                                  \
+		uint32_t adc_ker_hz;                                                               \
 		int err;                                                                           \
 		uint8_t i;                                                                         \
 		if (!device_is_ready(cfg->sync_actuator)) {                                        \
@@ -614,16 +777,22 @@ static const struct motor_sensor_ops motor_sensor_stm32_api = {
 		data->amps_per_count = (((float)cfg->vref_mv * 1e-3f) /                              \
 					 (float)(1U << cfg->resolution_bits)) *                       \
 				       cfg->amps_per_volt;                                            \
+		err = motor_sensor_stm32_adc_kernel_freq(cfg, &adc_ker_hz);                         \
+		if (err != 0) {                                                                    \
+			return err;                                                                \
+		}                                                                                  \
+		LOG_INF("ADC kernel clock %u Hz (silicon rev 0x%04x)", adc_ker_hz,                  \
+			(unsigned int)LL_DBGMCU_GetRevisionID());                                   \
 		err = motor_sensor_stm32_check_adc_pwm_margin(cfg->sync_actuator,                    \
-								data->n_adc_channels);                 \
+								data->n_adc_channels, adc_ker_hz);     \
 		if (err != 0) {                                                                    \
 			return err;                                                                \
 		}                                                                                  \
 		data->measurement_done_cb = NULL;                                                  \
 		data->measurement_done_user_data = NULL;                                           \
 		data->angle_rad = 0.0f;                                                            \
-		err = adc_inj_configure(cfg->adc, cfg->adc_common_clock, data->adc_ch_decimal,      \
-					data->n_adc_channels, cfg->resolution_bits);                 \
+		err = adc_inj_configure(cfg, data->adc_ch_decimal, data->n_adc_channels,            \
+					cfg->resolution_bits);                                      \
 		if (err != 0) {                                                                    \
 			return err;                                                                \
 		}                                                                                  \
